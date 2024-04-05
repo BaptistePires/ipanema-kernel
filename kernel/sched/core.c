@@ -5662,55 +5662,57 @@ static inline u64 cpu_resched_latency(struct rq *rq) { return 0; }
  * 1) We cannot sleep/wait here.
  * 2) We might not want to interfere with the existing behavior.
  *
+	Compiling error as it is currently unused.
  */
 
-struct aperfmperf_sample {
-	unsigned int khz;
-	u64 aperf;
-	u64 mperf;
-};
+// struct aperfmperf_sample {
+// 	unsigned int khz;
+// 	u64 aperf;
+// 	u64 mperf;
+// };
 
-static DEFINE_PER_CPU(struct aperfmperf_sample, samples);
+// static DEFINE_PER_CPU(struct aperfmperf_sample, samples);
 
-static void aperfmperf_snapshot_khz(void *dummy)
-{
-	u64 aperf, aperf_delta;
-	u64 mperf, mperf_delta;
-	struct aperfmperf_sample *s = this_cpu_ptr(&samples);
-	unsigned long flags;
+// static void aperfmperf_snapshot_khz(void *dummy)
+// {
+// 	u64 aperf, aperf_delta;
+// 	u64 mperf, mperf_delta;
+// 	struct aperfmperf_sample *s = this_cpu_ptr(&samples);
+// 	unsigned long flags;
 
-	local_irq_save(flags);
-	rdmsrl(MSR_IA32_APERF, aperf);
-	rdmsrl(MSR_IA32_MPERF, mperf);
-	local_irq_restore(flags);
+// 	local_irq_save(flags);
+// 	rdmsrl(MSR_IA32_APERF, aperf);
+// 	rdmsrl(MSR_IA32_MPERF, mperf);
+// 	local_irq_restore(flags);
 
-	aperf_delta = aperf - s->aperf;
-	mperf_delta = mperf - s->mperf;
+// 	aperf_delta = aperf - s->aperf;
+// 	mperf_delta = mperf - s->mperf;
 
-	/*
-	 * There is no architectural guarantee that MPERF
-	 * increments faster than we can read it.
-	 */
-	if (mperf_delta == 0)
-		return;
+// 	/*
+// 	 * There is no architectural guarantee that MPERF
+// 	 * increments faster than we can read it.
+// 	 */
+// 	if (mperf_delta == 0)
+// 		return;
 
-	s->aperf = aperf;
-	s->mperf = mperf;
-	s->khz = div64_u64((cpu_khz * aperf_delta), mperf_delta);
-}
+// 	s->aperf = aperf;
+// 	s->mperf = mperf;
+// 	s->khz = div64_u64((cpu_khz * aperf_delta), mperf_delta);
+// }
 
-static unsigned int my_aperfmperf_get_khz(int cpu)
-{
-	if (!cpu_khz)
-		return 0;
 
-	if (!static_cpu_has(X86_FEATURE_APERFMPERF))
-		return 0;
+// static unsigned int my_aperfmperf_get_khz(int cpu)
+// {
+// 	if (!cpu_khz)
+// 		return 0;
 
-	aperfmperf_snapshot_khz(NULL);
+// 	if (!static_cpu_has(X86_FEATURE_APERFMPERF))
+// 		return 0;
 
-	return per_cpu(samples.khz, cpu);
-}
+// 	aperfmperf_snapshot_khz(NULL);
+
+// 	return per_cpu(samples.khz, cpu);
+// }
 
 /*
  * This function gets called by the timer code, with HZ frequency.
@@ -10693,6 +10695,12 @@ void sched_move_task(struct task_struct *tsk)
 		 */
 		resched_curr(rq);
 	}
+}
+
+static inline struct task_group *css_tg(struct cgroup_subsys_state *css)
+{
+	return css ? container_of(css, struct task_group, css) : NULL;
+}
 
 static struct cgroup_subsys_state *
 cpu_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
@@ -10700,6 +10708,7 @@ cpu_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
 	struct task_group *parent = css_tg(parent_css);
 	struct task_group *tg;
 
+	if (!parent) {
 		/* This is early initialization for the top cgroup */
 		return &root_task_group.css;
 	}

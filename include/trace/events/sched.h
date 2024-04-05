@@ -734,30 +734,6 @@ TRACE_EVENT(sched_wake_idle_without_ipi,
 	TP_printk("cpu=%d", __entry->cpu)
 );
 
-/*
- * Tracepoint for runqueue size change.
- */
-TRACE_EVENT(sched_rq_size_change,
-
-	    TP_PROTO(struct rq *rq, int count),
-
-	    TP_ARGS(rq, count),
-
-	    TP_STRUCT__entry(
-		    __field(int, rq_cpu )
-		    __field(int, rq_size)
-		    __field(int, count  )
-	    ),
-
-	    TP_fast_assign(
-		    __entry->rq_cpu  = rq->cpu;
-		    __entry->rq_size = rq->nr_running;
-		    __entry->count   = count;
-	    ),
-
-	    TP_printk("rq_cpu=%d rq_size=%d count=%d",
-		      __entry->rq_cpu, __entry->rq_size, __entry->count)
-);
 
 /*
  * Tracepoint for scheduler_tick.

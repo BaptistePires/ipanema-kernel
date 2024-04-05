@@ -2547,7 +2547,6 @@ static inline void sched_update_tick_dependency(struct rq *rq) { }
 #define add_nr_running(rq, count)			\
 	do {						\
 		__add_nr_running(rq, count);		\
-		trace_sched_rq_size_change(rq, count);	\
 	} while (0)
 
 static inline void __add_nr_running(struct rq *rq, unsigned count)
@@ -2572,7 +2571,6 @@ static inline void __add_nr_running(struct rq *rq, unsigned count)
 #define sub_nr_running(rq, count)			\
 	do {						\
 		__sub_nr_running(rq, count);		\
-		trace_sched_rq_size_change(rq, -count); \
 	} while (0)
 
 static inline void __sub_nr_running(struct rq *rq, unsigned count)

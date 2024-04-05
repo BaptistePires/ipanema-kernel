@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
-#define pr_fmt(fmt) "ipanema: " fmt
+#include "linux/proc_fs.h"
+
 
 #include "sched.h"
 #include "ipanema.h"
@@ -14,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/kref.h>
 #include <trace/events/sched.h>
+#include <linux/sched/cputime.h>
 
 LIST_HEAD(ipanema_policies);
 s64 num_ipanema_policies;
@@ -32,19 +34,19 @@ EXPORT_SYMBOL(get_ipanema_current);
 
 void ipanema_lock_core(unsigned int id)
 {
-	raw_spin_lock(&cpu_rq(id)->lock);
+	raw_spin_lock(&cpu_rq(id)->__lock);
 }
 EXPORT_SYMBOL(ipanema_lock_core);
 
 int ipanema_trylock_core(unsigned int id)
 {
-	return raw_spin_trylock(&cpu_rq(id)->lock);
+	return raw_spin_trylock(&cpu_rq(id)->__lock);
 }
 EXPORT_SYMBOL(ipanema_trylock_core);
 
 void ipanema_unlock_core(unsigned int id)
 {
-	raw_spin_unlock(&cpu_rq(id)->lock);
+	raw_spin_unlock(&cpu_rq(id)->__lock);
 }
 EXPORT_SYMBOL(ipanema_unlock_core);
 
@@ -132,7 +134,7 @@ end:
 }
 EXPORT_SYMBOL(ipanema_remove_policy);
 
-void ipanema_core_entry(struct ipanema_policy *policy, unsigned int core)
+static void ipanema_core_entry(struct ipanema_policy *policy, unsigned int core)
 {
 	struct core_event e = { .target = core };
 
@@ -142,7 +144,7 @@ void ipanema_core_entry(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->core_entry(policy, &e);
 }
 
-void ipanema_core_exit(struct ipanema_policy *policy, unsigned int core)
+static void ipanema_core_exit(struct ipanema_policy *policy, unsigned int core)
 {
 	struct core_event e = { .target = core };
 
@@ -152,7 +154,7 @@ void ipanema_core_exit(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->core_exit(policy, &e);
 }
 
-enum ipanema_core_state ipanema_get_core_state(struct ipanema_policy *policy,
+static enum ipanema_core_state ipanema_get_core_state(struct ipanema_policy *policy,
 					       unsigned int core)
 {
 	struct core_event e = { .target = core };
@@ -163,7 +165,7 @@ enum ipanema_core_state ipanema_get_core_state(struct ipanema_policy *policy,
 	return policy->routines->get_core_state(policy, &e);
 }
 
-int ipanema_new_prepare(struct process_event *e)
+static int ipanema_new_prepare(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct ipanema_policy *policy;
@@ -188,12 +190,12 @@ int ipanema_new_prepare(struct process_event *e)
 	return policy->routines->new_prepare(policy, e);
 }
 
-void ipanema_new_place(struct process_event *e)
+static void ipanema_new_place(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct ipanema_policy *policy;
 
-	lockdep_assert_held(&task_rq(p)->lock);
+	lockdep_assert_held(&task_rq(p)->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -203,20 +205,23 @@ void ipanema_new_place(struct process_event *e)
 	policy->routines->new_place(policy, e);
 }
 
-void ipanema_new_end(struct process_event *e)
-{
-	struct task_struct *p = e->target;
-	struct ipanema_policy *policy;
+/*
+	Compiling error as it is currently unused.
+*/
+// static void ipanema_new_end(struct process_event *e)
+// {
+// 	struct task_struct *p = e->target;
+// 	struct ipanema_policy *policy;
 
-	policy = ipanema_task_policy(p);
+// 	policy = ipanema_task_policy(p);
 
-	WARN(!policy->routines->new_end,
-	     "%s is NULL in policy %s\n", __func__, policy->name);
+// 	WARN(!policy->routines->new_end,
+// 	     "%s is NULL in policy %s\n", __func__, policy->name);
 
-	policy->routines->new_end(policy, e);
-}
+// 	policy->routines->new_end(policy, e);
+// }
 
-void ipanema_tick(struct process_event *e)
+static void ipanema_tick(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct rq *rq = task_rq(p);
@@ -226,7 +231,7 @@ void ipanema_tick(struct process_event *e)
 	 * Make sure the rq lock is held, because we will need to call
 	 * resched_curr() to schedule another thread.
 	 */
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&rq->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -236,7 +241,7 @@ void ipanema_tick(struct process_event *e)
 	policy->routines->tick(policy, e);
 }
 
-void ipanema_yield(struct process_event *e)
+static void ipanema_yield(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct rq *rq = task_rq(p);
@@ -246,7 +251,7 @@ void ipanema_yield(struct process_event *e)
 	 * Make sure the rq lock is held, because we will need to call
 	 * resched_curr() to schedule another thread.
 	 */
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&rq->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -256,7 +261,7 @@ void ipanema_yield(struct process_event *e)
 	policy->routines->yield(policy, e);
 }
 
-void ipanema_block(struct process_event *e)
+static void ipanema_block(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct rq *rq = task_rq(p);
@@ -266,7 +271,7 @@ void ipanema_block(struct process_event *e)
 	 * Make sure the rq lock is held, because we will need to call
 	 * resched_curr() to schedule another thread.
 	 */
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&rq->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -276,7 +281,7 @@ void ipanema_block(struct process_event *e)
 	policy->routines->block(policy, e);
 }
 
-int ipanema_unblock_prepare(struct process_event *e)
+static int ipanema_unblock_prepare(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct ipanema_policy *policy;
@@ -291,12 +296,12 @@ int ipanema_unblock_prepare(struct process_event *e)
 	return policy->routines->unblock_prepare(policy, e);
 }
 
-void ipanema_unblock_place(struct process_event *e)
+static void ipanema_unblock_place(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct ipanema_policy *policy;
 
-	lockdep_assert_held(&task_rq(p)->lock);
+	lockdep_assert_held(&task_rq(p)->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -306,28 +311,31 @@ void ipanema_unblock_place(struct process_event *e)
 	policy->routines->unblock_place(policy, e);
 }
 
-void ipanema_unblock_end(struct process_event *e)
-{
-	struct task_struct *p = e->target;
-	struct ipanema_policy *policy;
+/*
+	Compiling error as it is currently unused.
+*/
+// static void ipanema_unblock_end(struct process_event *e)
+// {
+// 	struct task_struct *p = e->target;
+// 	struct ipanema_policy *policy;
 
-	lockdep_assert_held(&p->pi_lock);
+// 	lockdep_assert_held(&p->pi_lock);
 
-	policy = ipanema_task_policy(p);
+// 	policy = ipanema_task_policy(p);
 
-	WARN(!policy->routines->unblock_end,
-	     "%s is NULL in policy %s\n", __func__, policy->name);
+// 	WARN(!policy->routines->unblock_end,
+// 	     "%s is NULL in policy %s\n", __func__, policy->name);
 
-	policy->routines->unblock_end(policy, e);
-}
+// 	policy->routines->unblock_end(policy, e);
+// }
 
-void ipanema_terminate(struct process_event *e)
+static void ipanema_terminate(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct rq *rq = task_rq(p);
 	struct ipanema_policy *policy;
 
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&rq->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -340,7 +348,7 @@ void ipanema_terminate(struct process_event *e)
 	module_put(policy->kmodule);
 }
 
-void ipanema_schedule(struct ipanema_policy *policy, unsigned int core)
+static void ipanema_schedule(struct ipanema_policy *policy, unsigned int core)
 {
 	struct rq *rq = cpu_rq(core);
 
@@ -351,7 +359,7 @@ void ipanema_schedule(struct ipanema_policy *policy, unsigned int core)
 	 * We *must* hold the rq lock here, otherwise we can make a ready task
 	 * running while another thread is stealing it.
 	 */
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&rq->__lock);
 
 	WARN(!policy->routines->schedule,
 	     "%s is NULL in policy %s\n", __func__, policy->name);
@@ -359,7 +367,7 @@ void ipanema_schedule(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->schedule(policy, core);
 }
 
-void ipanema_newly_idle(struct ipanema_policy *policy, unsigned int core,
+static void ipanema_newly_idle(struct ipanema_policy *policy, unsigned int core,
 			struct rq_flags *rf)
 {
 	struct core_event e = { .target = core };
@@ -369,22 +377,22 @@ void ipanema_newly_idle(struct ipanema_policy *policy, unsigned int core,
 	     "%s is NULL in policy %s\n", __func__, policy->name);
 
 	/*
-	 * When newly_idle() is called by schedule(), the rq->lock is
-	 * held. However, the handler may want to lock multiple rq->lock
+	 * When newly_idle() is called by schedule(), the rq->__lock is
+	 * held. However, the handler may want to lock multiple rq->__lock
 	 * (idle balancing for example). To allow this, we unpin and
-	 * unlock rq->lock before. We will put everything back to normal
+	 * unlock rq->__lock before. We will put everything back to normal
 	 * upon returning from the handler.
 	 */
 	rq_unpin_lock(rq, rf);
-	raw_spin_unlock(&rq->lock);
+	raw_spin_unlock(&rq->__lock);
 
 	policy->routines->newly_idle(policy, &e);
 
-	raw_spin_lock(&rq->lock);
+	raw_spin_lock(&rq->__lock);
 	rq_repin_lock(rq, rf);
 }
 
-void ipanema_enter_idle(struct ipanema_policy *policy, unsigned int core)
+static void ipanema_enter_idle(struct ipanema_policy *policy, unsigned int core)
 {
 	struct core_event e = { .target = core };
 
@@ -394,7 +402,7 @@ void ipanema_enter_idle(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->enter_idle(policy, &e);
 }
 
-void ipanema_exit_idle(struct ipanema_policy *policy, unsigned int core)
+static void ipanema_exit_idle(struct ipanema_policy *policy, unsigned int core)
 {
 	struct core_event e = { .target = core };
 
@@ -404,7 +412,7 @@ void ipanema_exit_idle(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->exit_idle(policy, &e);
 }
 
-void ipanema_balancing_select(void)
+static void ipanema_balancing_select(void)
 {
 	unsigned int core = smp_processor_id();
 	struct ipanema_policy *policy;
@@ -419,9 +427,12 @@ void ipanema_balancing_select(void)
 	read_unlock_irqrestore(&ipanema_rwlock, flags);
 }
 
-void ipanema_init(void)
-{
-}
+/*
+	Compiling error as it is currently unused.
+*/
+// static void ipanema_init(void)
+// {
+// }
 
 struct task_struct *ipanema_get_task_of(void *proc)
 {
@@ -474,7 +485,7 @@ static void check_ipanema_transition(struct task_struct *p,
 				     unsigned int next_cpu)
 {
 	enum ipanema_state prev_state = p->ipanema.state;
-	unsigned int prev_cpu = p->cpu;
+	unsigned int prev_cpu = task_cpu(p);
 
 	switch (prev_state) {
 	case IPANEMA_NOT_QUEUED:
@@ -540,7 +551,7 @@ static void change_rq(struct task_struct *p, enum ipanema_state next_state,
 	prev_state = ipanema_task_state(p);
 
 	if (prev_rq) {
-		lockdep_assert_held(&task_rq(p)->lock);
+		lockdep_assert_held(&task_rq(p)->__lock);
 		p = ipanema_remove_task(prev_rq, p);
 		prev_rq->nr_tasks--;
 	}
@@ -551,7 +562,7 @@ static void change_rq(struct task_struct *p, enum ipanema_state next_state,
 	if (next_rq) {
 		next_cpu = next_rq->cpu;
 		next_state = next_rq->state;
-		lockdep_assert_held(&cpu_rq(next_cpu)->lock);
+		lockdep_assert_held(&cpu_rq(next_cpu)->__lock);
 		if (ipanema_add_task(next_rq, p))
 			pr_err("[ERR] %s(pid=%d, cpu=%u) failed. Gonna crash soon...\n",
 			       __func__, p->pid, next_cpu);
@@ -779,7 +790,7 @@ static void enqueue_task_ipanema(struct rq *rq,
 	 * cpu. It will be placed on a cpu handled by the policy and authorized
 	 * for this thread.
 	 */
-	if (p->state == TASK_WAKING ||
+	if (READ_ONCE(p->__state) == TASK_WAKING ||
 	    (flags & OUSTED && task_on_rq_migrating(p))) {
 		/*
 		 * If unblock_prepare() chose an IDLE cpu, we must call the
@@ -801,8 +812,8 @@ static void enqueue_task_ipanema(struct rq *rq,
 	if (flags & ENQUEUE_RESTORE)
 		goto end;
 
-	pr_warn("[WARN] Uncaught enqueue, CONTEXT: p=[pid=%d, cpu=%d, state=%ld, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
-		       p->pid, p->cpu, p->state, p->on_cpu, p->on_rq,
+	pr_warn("[WARN] Uncaught enqueue, CONTEXT: p=[pid=%d, cpu=%d, state=%u, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
+		       p->pid, task_cpu(p), READ_ONCE(p->__state), p->on_cpu, p->on_rq,
 		       ipanema_state_to_str(ipanema_task_state(p)),
 		       rq->cpu, rq, flags);
 
@@ -814,7 +825,7 @@ end:
 static void update_curr_ipanema(struct rq *rq)
 {
 	struct task_struct *curr = rq->curr;
-	u64 delta_exec;
+	s64 delta_exec;
 
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [rq=%d]\n", __func__, rq->cpu);
@@ -827,8 +838,8 @@ static void update_curr_ipanema(struct rq *rq)
 	if (unlikely((s64)delta_exec <= 0))
 		return;
 
-	schedstat_set(curr->se.statistics.exec_max,
-		      max(curr->se.statistics.exec_max, delta_exec));
+	schedstat_set(curr->stats.exec_max,
+		      max(curr->stats.exec_max, delta_exec));
 
 	curr->se.sum_exec_runtime += delta_exec;
 	account_group_exec_runtime(curr, delta_exec);
@@ -842,7 +853,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 				 int flags)
 {
 	struct process_event e = { .target = p, .cpu = smp_processor_id() };
-
+	int state;
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d, rq=%d]\n",
 			__func__, p->pid, rq->cpu);
@@ -905,10 +916,11 @@ static void dequeue_task_ipanema(struct rq *rq,
 	 * cpu. It will be placed on a cpu handled by the policy and authorized
 	 * for this thread.
 	 */
-	if (p->state & TASK_INTERRUPTIBLE ||
-	    p->state & TASK_UNINTERRUPTIBLE ||
-	    p->state & TASK_STOPPED ||
-	    p->state & TASK_KILLABLE ||
+	state = READ_ONCE(p->__state);
+	if (state & TASK_INTERRUPTIBLE ||
+	    state & TASK_UNINTERRUPTIBLE ||
+	    state & TASK_STOPPED ||
+	    state & TASK_KILLABLE ||
 	    (flags & OUSTED && task_on_rq_migrating(p))) {
 		ipanema_block(&e);
 		goto end;
@@ -921,8 +933,10 @@ static void dequeue_task_ipanema(struct rq *rq,
 	 * schedule() is called. Consequently, if we don't remove the task from
 	 * the rbtree now, it will be scheduled again while it is not queued,
 	 * which will lead to a crash.
+	 * Migration v6.8 : PF_EXITPIDONE does not exist anymore, check if
+	 * is the right replacement.
 	 */
-	if (p->flags & PF_EXITPIDONE) {
+	if (p->flags & PF_EXITING) {
 		ipanema_terminate(&e);
 		goto end;
 	}
@@ -934,8 +948,8 @@ static void dequeue_task_ipanema(struct rq *rq,
 	if (flags & DEQUEUE_SAVE)
 		goto end;
 
-	pr_warn("[WARN] Uncaught dequeue, CONTEXT: p=[pid=%d, cpu=%d, state=%ld, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
-		p->pid, p->cpu, p->state, p->on_cpu, p->on_rq,
+	pr_warn("[WARN] Uncaught dequeue, CONTEXT: p=[pid=%d, cpu=%d, state=%u, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
+		p->pid, task_cpu(p), p->__state, p->on_cpu, p->on_rq,
 		ipanema_state_to_str(ipanema_task_state(p)),
 		rq->cpu, rq, flags);
 
@@ -963,8 +977,7 @@ static void yield_task_ipanema(struct rq *rq)
 }
 
 static bool yield_to_task_ipanema(struct rq *rq,
-				  struct task_struct *p,
-				  bool preempt)
+				  struct task_struct *p)
 {
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d, rq=%d]\n",
@@ -981,6 +994,7 @@ static void check_preempt_wakeup(struct rq *rq,
 		pr_info("In %s [pid=%d, rq=%d]\n",
 			__func__, p->pid, rq->cpu);
 }
+
 
 static struct task_struct *pick_next_task_ipanema(struct rq *rq,
 						  struct task_struct *prev,
@@ -1010,7 +1024,7 @@ static struct task_struct *pick_next_task_ipanema(struct rq *rq,
 	 */
 	result = per_cpu(ipanema_current, rq->cpu);
 	if (result) {
-		if (result->state != TASK_RUNNING) {
+		if (READ_ONCE(result->__state) != TASK_RUNNING) {
 			/* current has signals pending, leave it running */
 			goto end;
 		} else {
@@ -1070,6 +1084,11 @@ end:
 	return result;
 }
 
+static struct task_struct *__pick_next_task_ipanema(struct rq *rq)
+{
+	return pick_next_task_ipanema(rq, NULL, NULL);
+}
+
 static void put_prev_task_ipanema(struct rq *rq,
 				  struct task_struct *prev)
 {
@@ -1095,8 +1114,8 @@ static void put_prev_task_ipanema(struct rq *rq,
 	 * because the task will keep the cpu in its new sched_class.
 	 */
 	if (!prev->ipanema.policy) {
-		if (per_cpu(ipanema_current, prev->cpu) == prev)
-			per_cpu(ipanema_current, prev->cpu) = NULL;
+		if (per_cpu(ipanema_current, task_cpu(prev)) == prev)
+			per_cpu(ipanema_current, task_cpu(prev)) = NULL;
 		return;
 	}
 
@@ -1163,11 +1182,10 @@ static int balance_ipanema(struct rq *rq, struct task_struct *prev,
 
 static int select_task_rq_ipanema(struct task_struct *p,
 				  int prev_cpu,
-				  int sd_flag,
 				  int wake_flags)
 {
 	struct process_event e = { .target = p, .cpu = smp_processor_id() };
-	int ret = p->cpu;
+	int ret = task_cpu(p);
 
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d]\n",
@@ -1195,9 +1213,9 @@ static int select_task_rq_ipanema(struct task_struct *p,
 			pr_warn("[WARN] %s: new_prepare failed (pid=%d, policy=%llu), reverting to p->cpu\n",
 				__func__, p->pid,
 				ipanema_task_policy(p)->id);
-			ret = p->cpu;
+			ret = task_cpu(p);
 		}
-	} else if (p->state == TASK_WAKING) {
+	} else if (p->__state == TASK_WAKING) {
 		ret = ipanema_unblock_prepare(&e);
 		/* if migrating on wakeup, remove from previous cpu */
 		if (ret >= 0 && ret != task_cpu(p)) {
@@ -1266,7 +1284,7 @@ static void task_dead_ipanema(struct task_struct *p)
 }
 #endif
 
-static void set_next_task_ipanema(struct rq *rq, struct task_struct *p)
+static void set_next_task_ipanema(struct rq *rq, struct task_struct *p, bool first)
 {
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [rq=%d, pid=%d]\n",
@@ -1367,7 +1385,7 @@ static void switched_to_ipanema(struct rq *rq, struct task_struct *p)
 		 * We can safely call resched_curr() here, because the rq lock
 		 * is held.
 		 */
-		lockdep_assert_held(&rq->lock);
+		lockdep_assert_held(&rq->__lock);
 		resched_curr(rq);
 	}
 }
@@ -1383,7 +1401,7 @@ static unsigned int get_rr_interval_ipanema(struct rq *rq,
 }
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
-static void task_change_group_ipanema(struct task_struct *p, int type)
+static void task_change_group_ipanema(struct task_struct *p)
 {
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d]\n",
@@ -1391,21 +1409,20 @@ static void task_change_group_ipanema(struct task_struct *p, int type)
 }
 #endif
 
-void run_rebalance_domains(struct softirq_action *h)
+static void run_rebalance_domains(struct softirq_action *h)
 {
 	ipanema_balancing_select();
 }
 
 const struct sched_class ipanema_sched_class = {
-	.next			= &idle_sched_class,
 	.enqueue_task		= enqueue_task_ipanema,
 	.dequeue_task		= dequeue_task_ipanema,
 	.yield_task		= yield_task_ipanema,
 	.yield_to_task		= yield_to_task_ipanema,
 
-	.check_preempt_curr	= check_preempt_wakeup,
+	.wakeup_preempt	= check_preempt_wakeup,
 
-	.pick_next_task		= pick_next_task_ipanema,
+	.pick_next_task		= __pick_next_task_ipanema,
 	.put_prev_task		= put_prev_task_ipanema,
 
 #ifdef CONFIG_SMP
@@ -1886,11 +1903,11 @@ static int ipanema_policies_open(struct inode *inode, struct file *file)
 	return seq_open(file, &ipanema_policies_ops);
 }
 
-static const struct file_operations ipanema_policies_fops = {
-	.open    = ipanema_policies_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release,
+static const struct proc_ops ipanema_policies_fops = {
+	.proc_open    = ipanema_policies_open,
+	.proc_read    = seq_read,
+	.proc_lseek  = seq_lseek,
+	.proc_release = seq_release,
 };
 
 struct proc_dir_entry *ipa_procdir;
@@ -1990,6 +2007,8 @@ __init void init_sched_ipanema_class(void)
 
 	pr_info("sched_class initialized\n");
 }
+
+int init_sched_ipanema_late(void);
 
 __init int init_sched_ipanema_late(void)
 {

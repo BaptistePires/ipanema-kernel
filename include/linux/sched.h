@@ -796,6 +796,8 @@ struct sched_ipanema_entity {
 	void *policy_metadata;
 
 	struct ipanema_policy *policy;
+};
+
 struct kmap_ctrl {
 #ifdef CONFIG_KMAP_LOCAL
 	int				idx;

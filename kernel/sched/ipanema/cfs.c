@@ -1110,12 +1110,11 @@ static int proc_open(struct inode *inode, struct file *file)
 	return -ENOENT;
 }
 
-static const struct file_operations proc_fops = {
-	.owner   = THIS_MODULE,
-	.open    = proc_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = single_release
+static const struct proc_ops proc_fops = {
+	.proc_open    = proc_open,
+	.proc_read    = seq_read,
+	.proc_lseek  = seq_lseek,
+	.proc_release = single_release
 };
 
 static int proc_topo_show(struct seq_file *s, void *p)
