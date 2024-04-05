@@ -3,10 +3,6 @@
  * Copyright (C) 2018 Socionext Inc.
  */
 
-#if defined(CONFIG_SERIAL_MILBEAUT_USIO_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
-
 #include <linux/clk.h>
 #include <linux/console.h>
 #include <linux/module.h>
@@ -102,8 +98,7 @@ static void mlb_usio_tx_chars(struct uart_port *port)
 	do {
 		writew(xmit->buf[xmit->tail], port->membase + MLB_USIO_REG_DR);
 
-		xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
-		port->icount.tx++;
+		uart_xmit_advance(port, 1);
 		if (uart_circ_empty(xmit))
 			break;
 
@@ -153,8 +148,7 @@ static void mlb_usio_enable_ms(struct uart_port *port)
 static void mlb_usio_rx_chars(struct uart_port *port)
 {
 	struct tty_port *ttyport = &port->state->port;
-	unsigned long flag = 0;
-	char ch = 0;
+	u8 flag = 0, ch = 0;
 	u8 status;
 	int max_count = 2;
 
@@ -213,9 +207,9 @@ static irqreturn_t mlb_usio_rx_irq(int irq, void *dev_id)
 {
 	struct uart_port *port = dev_id;
 
-	spin_lock(&port->lock);
+	uart_port_lock(port);
 	mlb_usio_rx_chars(port);
-	spin_unlock(&port->lock);
+	uart_port_unlock(port);
 
 	return IRQ_HANDLED;
 }
@@ -224,10 +218,10 @@ static irqreturn_t mlb_usio_tx_irq(int irq, void *dev_id)
 {
 	struct uart_port *port = dev_id;
 
-	spin_lock(&port->lock);
+	uart_port_lock(port);
 	if (readb(port->membase + MLB_USIO_REG_SSR) & MLB_USIO_SSR_TBI)
 		mlb_usio_tx_chars(port);
-	spin_unlock(&port->lock);
+	uart_port_unlock(port);
 
 	return IRQ_HANDLED;
 }
@@ -273,7 +267,7 @@ static int mlb_usio_startup(struct uart_port *port)
 	escr = readb(port->membase + MLB_USIO_REG_ESCR);
 	if (of_property_read_bool(port->dev->of_node, "auto-flow-control"))
 		escr |= MLB_USIO_ESCR_FLWEN;
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 	writeb(0, port->membase + MLB_USIO_REG_SCR);
 	writeb(escr, port->membase + MLB_USIO_REG_ESCR);
 	writeb(MLB_USIO_SCR_UPCL, port->membase + MLB_USIO_REG_SCR);
@@ -288,7 +282,7 @@ static int mlb_usio_startup(struct uart_port *port)
 
 	writeb(MLB_USIO_SCR_TXE  | MLB_USIO_SCR_RIE | MLB_USIO_SCR_TBIE |
 	       MLB_USIO_SCR_RXE, port->membase + MLB_USIO_REG_SCR);
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 
 	return 0;
 }
@@ -302,7 +296,8 @@ static void mlb_usio_shutdown(struct uart_port *port)
 }
 
 static void mlb_usio_set_termios(struct uart_port *port,
-			struct ktermios *termios, struct ktermios *old)
+				 struct ktermios *termios,
+				 const struct ktermios *old)
 {
 	unsigned int escr, smr = MLB_USIO_SMR_SOE;
 	unsigned long flags, baud, quot;
@@ -342,7 +337,7 @@ static void mlb_usio_set_termios(struct uart_port *port,
 	else
 		quot = 0;
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 	uart_update_timeout(port, termios->c_cflag, baud);
 	port->read_status_mask = MLB_USIO_SSR_ORE | MLB_USIO_SSR_RDRF |
 				 MLB_USIO_SSR_TDRE;
@@ -372,7 +367,7 @@ static void mlb_usio_set_termios(struct uart_port *port,
 	writew(BIT(12), port->membase + MLB_USIO_REG_FBYTE);
 	writeb(MLB_USIO_SCR_RIE | MLB_USIO_SCR_RXE | MLB_USIO_SCR_TBIE |
 	       MLB_USIO_SCR_TXE, port->membase + MLB_USIO_REG_SCR);
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 }
 
 static const char *mlb_usio_type(struct uart_port *port)
@@ -404,7 +399,7 @@ static const struct uart_ops mlb_usio_ops = {
 
 #ifdef CONFIG_SERIAL_MILBEAUT_USIO_CONSOLE
 
-static void mlb_usio_console_putchar(struct uart_port *port, int c)
+static void mlb_usio_console_putchar(struct uart_port *port, unsigned char c)
 {
 	while (!(readb(port->membase + MLB_USIO_REG_SSR) & MLB_USIO_SSR_TDRE))
 		cpu_relax();
@@ -537,6 +532,7 @@ static int mlb_usio_probe(struct platform_device *pdev)
 	port->irq = mlb_usio_irq[index][RX];
 	port->uartclk = clk_get_rate(clk);
 	port->fifosize = 128;
+	port->has_sysrq = IS_ENABLED(CONFIG_SERIAL_MILBEAUT_USIO_CONSOLE);
 	port->iotype = UPIO_MEM32;
 	port->flags = UPF_BOOT_AUTOCONF | UPF_SPD_VHI;
 	port->line = index;
@@ -556,15 +552,13 @@ failed:
 	return ret;
 }
 
-static int mlb_usio_remove(struct platform_device *pdev)
+static void mlb_usio_remove(struct platform_device *pdev)
 {
 	struct uart_port *port = &mlb_usio_ports[pdev->id];
 	struct clk *clk = port->private_data;
 
 	uart_remove_one_port(&mlb_usio_uart_driver, port);
 	clk_disable_unprepare(clk);
-
-	return 0;
 }
 
 static const struct of_device_id mlb_usio_dt_ids[] = {
@@ -575,7 +569,7 @@ MODULE_DEVICE_TABLE(of, mlb_usio_dt_ids);
 
 static struct platform_driver mlb_usio_driver = {
 	.probe          = mlb_usio_probe,
-	.remove         = mlb_usio_remove,
+	.remove_new     = mlb_usio_remove,
 	.driver         = {
 		.name   = USIO_NAME,
 		.of_match_table = mlb_usio_dt_ids,

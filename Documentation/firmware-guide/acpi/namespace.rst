@@ -31,7 +31,7 @@ Description Table).  The XSDT always points to the FADT (Fixed ACPI
 Description Table) using its first entry, the data within the FADT
 includes various fixed-length entries that describe fixed ACPI features
 of the hardware.  The FADT contains a pointer to the DSDT
-(Differentiated System Descripition Table).  The XSDT also contains
+(Differentiated System Description Table).  The XSDT also contains
 entries pointing to possibly multiple SSDTs (Secondary System
 Description Table).
 
@@ -56,13 +56,13 @@ are illustrated in the following diagram::
                   +- - - -+                  |  +-------------------| |
                   | Entry | - - - - - - - -+ |  | Definition Blocks | |
                   +- - - -+                | |  +-------------------+ |
-                                          | |  +- - - - - - - - - -+ |
-                                          +-|->|       SSDT        | |
+                                           | |  +- - - - - - - - - -+ |
+                                           +-|->|       SSDT        | |
                                              |  +-------------------+ |
                                              |  | Definition Blocks | |
                                              |  +- - - - - - - - - -+ |
                                              +------------------------+
-                                                         |
+                                                          |
                                              OSPM Loading |
                                                          \|/
                                                    +----------------+
@@ -261,7 +261,7 @@ Description Tables contain information used for the creation of the
 struct acpi_device objects represented by the given row (xSDT means DSDT
 or SSDT).
 
-The forth column of the above table indicates the 'bus_id' generation
+The fourth column of the above table indicates the 'bus_id' generation
 rule of the struct acpi_device object:
 
    _HID:

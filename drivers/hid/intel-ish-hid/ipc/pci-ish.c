@@ -5,6 +5,7 @@
  * Copyright (c) 2014-2016, Intel Corporation.
  */
 
+#include <linux/acpi.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -34,7 +35,16 @@ static const struct pci_device_id ish_pci_tbl[] = {
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, ICL_MOBILE_DEVICE_ID)},
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, SPT_H_DEVICE_ID)},
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, CML_LP_DEVICE_ID)},
+	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, CMP_H_DEVICE_ID)},
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, EHL_Ax_DEVICE_ID)},
+	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, TGL_LP_DEVICE_ID)},
+	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, TGL_H_DEVICE_ID)},
+	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, ADL_S_DEVICE_ID)},
+	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, ADL_P_DEVICE_ID)},
+	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, ADL_N_DEVICE_ID)},
+	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, RPL_S_DEVICE_ID)},
+	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, MTL_P_DEVICE_ID)},
+	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, ARL_H_DEVICE_ID)},
 	{0, }
 };
 MODULE_DEVICE_TABLE(pci, ish_pci_tbl);
@@ -102,6 +112,11 @@ static const struct pci_device_id ish_invalid_pci_ids[] = {
 static inline bool ish_should_enter_d0i3(struct pci_dev *pdev)
 {
 	return !pm_suspend_via_firmware() || pdev->device == CHV_DEVICE_ID;
+}
+
+static inline bool ish_should_leave_d0i3(struct pci_dev *pdev)
+{
+	return !pm_resume_via_firmware() || pdev->device == CHV_DEVICE_ID;
 }
 
 /**
@@ -172,6 +187,10 @@ static int ish_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	init_waitqueue_head(&ishtp->suspend_wait);
 	init_waitqueue_head(&ishtp->resume_wait);
 
+	/* Enable PME for EHL */
+	if (pdev->device == EHL_Ax_DEVICE_ID)
+		device_init_wakeup(dev, true);
+
 	ret = ish_init(ishtp);
 	if (ret)
 		return ret;
@@ -193,6 +212,19 @@ static void ish_remove(struct pci_dev *pdev)
 	ish_device_disable(ishtp_dev);
 }
 
+
+/**
+ * ish_shutdown() - PCI driver shutdown callback
+ * @pdev:	pci device
+ *
+ * This function sets up wakeup for S5
+ */
+static void ish_shutdown(struct pci_dev *pdev)
+{
+	if (pdev->device == EHL_Ax_DEVICE_ID)
+		pci_prepare_to_sleep(pdev);
+}
+
 static struct device __maybe_unused *ish_resume_device;
 
 /* 50ms to get resume response */
@@ -211,18 +243,20 @@ static void __maybe_unused ish_resume_handler(struct work_struct *work)
 {
 	struct pci_dev *pdev = to_pci_dev(ish_resume_device);
 	struct ishtp_device *dev = pci_get_drvdata(pdev);
-	int ret;
+	uint32_t fwsts = dev->ops->get_fw_status(dev);
 
-	/* Check the NO_D3 flag to distinguish the resume paths */
-	if (pdev->dev_flags & PCI_DEV_FLAGS_NO_D3) {
-		pdev->dev_flags &= ~PCI_DEV_FLAGS_NO_D3;
-		disable_irq_wake(pdev->irq);
+	if (ish_should_leave_d0i3(pdev) && !dev->suspend_flag
+			&& IPC_IS_ISH_ILUP(fwsts)) {
+		if (device_may_wakeup(&pdev->dev))
+			disable_irq_wake(pdev->irq);
+
+		ish_set_host_ready(dev);
 
 		ishtp_send_resume(dev);
 
 		/* Waiting to get resume response */
 		if (dev->resume_flag)
-			ret = wait_event_interruptible_timeout(dev->resume_wait,
+			wait_event_interruptible_timeout(dev->resume_wait,
 				!dev->resume_flag,
 				msecs_to_jiffies(WAIT_FOR_RESUME_ACK_MS));
 
@@ -279,10 +313,14 @@ static int __maybe_unused ish_suspend(struct device *device)
 			 */
 			ish_disable_dma(dev);
 		} else {
-			/* Set the NO_D3 flag, the ISH would enter D0i3 */
-			pdev->dev_flags |= PCI_DEV_FLAGS_NO_D3;
+			/*
+			 * Save state so PCI core will keep the device at D0,
+			 * the ISH would enter D0i3
+			 */
+			pci_save_state(pdev);
 
-			enable_irq_wake(pdev->irq);
+			if (device_may_wakeup(&pdev->dev))
+				enable_irq_wake(pdev->irq);
 		}
 	} else {
 		/*
@@ -324,6 +362,7 @@ static struct pci_driver ish_driver = {
 	.id_table = ish_pci_tbl,
 	.probe = ish_probe,
 	.remove = ish_remove,
+	.shutdown = ish_shutdown,
 	.driver.pm = &ish_pm_ops,
 };
 

@@ -126,7 +126,7 @@ static int list_scripts(char *script_name, bool *custom,
 			SCRIPT_FULLPATH_LEN);
 	if (num < 0)
 		num = 0;
-	choice = ui__popup_menu(num + max_std, (char * const *)names);
+	choice = ui__popup_menu(num + max_std, (char * const *)names, NULL);
 	if (choice < 0) {
 		ret = -1;
 		goto out;
@@ -166,6 +166,7 @@ void run_script(char *cmd)
 	printf("\033[c\033[H\033[J");
 	fflush(stdout);
 	SLang_init_tty(0, 0, 0);
+	SLtty_set_suspend_state(true);
 	SLsmg_refresh();
 }
 

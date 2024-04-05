@@ -9,11 +9,11 @@
 #include "xfs_format.h"
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
-#include "xfs_sb.h"
 #include "xfs_mount.h"
 #include "xfs_inode.h"
 #include "xfs_trace.h"
 #include "xfs_health.h"
+#include "xfs_ag.h"
 
 /*
  * Warn about metadata corruption that we detected but haven't fixed, and
@@ -30,18 +30,16 @@ xfs_health_unmount(
 	unsigned int		checked = 0;
 	bool			warn = false;
 
-	if (XFS_FORCED_SHUTDOWN(mp))
+	if (xfs_is_shutdown(mp))
 		return;
 
 	/* Measure AG corruption levels. */
-	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
-		pag = xfs_perag_get(mp, agno);
+	for_each_perag(mp, agno, pag) {
 		xfs_ag_measure_sickness(pag, &sick, &checked);
 		if (sick) {
 			trace_xfs_ag_unfixed_corruption(mp, agno, sick);
 			warn = true;
 		}
-		xfs_perag_put(pag);
 	}
 
 	/* Measure realtime volume corruption levels. */
@@ -224,13 +222,22 @@ xfs_inode_mark_sick(
 	struct xfs_inode	*ip,
 	unsigned int		mask)
 {
-	ASSERT(!(mask & ~XFS_SICK_INO_PRIMARY));
+	ASSERT(!(mask & ~(XFS_SICK_INO_PRIMARY | XFS_SICK_INO_ZAPPED)));
 	trace_xfs_inode_mark_sick(ip, mask);
 
 	spin_lock(&ip->i_flags_lock);
 	ip->i_sick |= mask;
 	ip->i_checked |= mask;
 	spin_unlock(&ip->i_flags_lock);
+
+	/*
+	 * Keep this inode around so we don't lose the sickness report.  Scrub
+	 * grabs inodes with DONTCACHE assuming that most inode are ok, which
+	 * is not the case here.
+	 */
+	spin_lock(&VFS_I(ip)->i_lock);
+	VFS_I(ip)->i_state &= ~I_DONTCACHE;
+	spin_unlock(&VFS_I(ip)->i_lock);
 }
 
 /* Mark parts of an inode healed. */
@@ -239,7 +246,7 @@ xfs_inode_mark_healthy(
 	struct xfs_inode	*ip,
 	unsigned int		mask)
 {
-	ASSERT(!(mask & ~XFS_SICK_INO_PRIMARY));
+	ASSERT(!(mask & ~(XFS_SICK_INO_PRIMARY | XFS_SICK_INO_ZAPPED)));
 	trace_xfs_inode_mark_healthy(ip, mask);
 
 	spin_lock(&ip->i_flags_lock);
@@ -362,6 +369,10 @@ static const struct ioctl_sick_map ino_map[] = {
 	{ XFS_SICK_INO_XATTR,	XFS_BS_SICK_XATTR },
 	{ XFS_SICK_INO_SYMLINK,	XFS_BS_SICK_SYMLINK },
 	{ XFS_SICK_INO_PARENT,	XFS_BS_SICK_PARENT },
+	{ XFS_SICK_INO_BMBTD_ZAPPED,	XFS_BS_SICK_BMBTD },
+	{ XFS_SICK_INO_BMBTA_ZAPPED,	XFS_BS_SICK_BMBTA },
+	{ XFS_SICK_INO_DIR_ZAPPED,	XFS_BS_SICK_DIR },
+	{ XFS_SICK_INO_SYMLINK_ZAPPED,	XFS_BS_SICK_SYMLINK },
 	{ 0, 0 },
 };
 

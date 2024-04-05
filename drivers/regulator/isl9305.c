@@ -137,8 +137,7 @@ static const struct regmap_config isl9305_regmap = {
 	.cache_type = REGCACHE_RBTREE,
 };
 
-static int isl9305_i2c_probe(struct i2c_client *i2c,
-			     const struct i2c_device_id *id)
+static int isl9305_i2c_probe(struct i2c_client *i2c)
 {
 	struct regulator_config config = { };
 	struct isl9305_pdata *pdata = i2c->dev.platform_data;
@@ -196,6 +195,7 @@ MODULE_DEVICE_TABLE(i2c, isl9305_i2c_id);
 static struct i2c_driver isl9305_regulator_driver = {
 	.driver = {
 		.name = "isl9305",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table	= of_match_ptr(isl9305_dt_ids),
 	},
 	.probe = isl9305_i2c_probe,

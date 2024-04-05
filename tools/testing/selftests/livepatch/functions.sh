@@ -6,6 +6,10 @@
 
 MAX_RETRIES=600
 RETRY_INTERVAL=".1"	# seconds
+KLP_SYSFS_DIR="/sys/kernel/livepatch"
+
+# Kselftest framework requirement - SKIP code is 4
+ksft_skip=4
 
 # log(msg) - write message to kernel log
 #	msg - insightful words
@@ -18,7 +22,16 @@ function log() {
 function skip() {
 	log "SKIP: $1"
 	echo "SKIP: $1" >&2
-	exit 4
+	exit $ksft_skip
+}
+
+# root test
+function is_root() {
+	uid=$(id -u)
+	if [ $uid -ne 0 ]; then
+		echo "skip all tests: must be run as root" >&2
+		exit $ksft_skip
+	fi
 }
 
 # die(msg) - game over, man
@@ -29,27 +42,64 @@ function die() {
 	exit 1
 }
 
-function push_dynamic_debug() {
-        DYNAMIC_DEBUG=$(grep '^kernel/livepatch' /sys/kernel/debug/dynamic_debug/control | \
-                awk -F'[: ]' '{print "file " $1 " line " $2 " " $4}')
+function push_config() {
+	DYNAMIC_DEBUG=$(grep '^kernel/livepatch' /sys/kernel/debug/dynamic_debug/control | \
+			awk -F'[: ]' '{print "file " $1 " line " $2 " " $4}')
+	FTRACE_ENABLED=$(sysctl --values kernel.ftrace_enabled)
 }
 
-function pop_dynamic_debug() {
+function pop_config() {
 	if [[ -n "$DYNAMIC_DEBUG" ]]; then
 		echo -n "$DYNAMIC_DEBUG" > /sys/kernel/debug/dynamic_debug/control
 	fi
+	if [[ -n "$FTRACE_ENABLED" ]]; then
+		sysctl kernel.ftrace_enabled="$FTRACE_ENABLED" &> /dev/null
+	fi
 }
 
-# set_dynamic_debug() - save the current dynamic debug config and tweak
-# 			it for the self-tests.  Set a script exit trap
-#			that restores the original config.
 function set_dynamic_debug() {
-        push_dynamic_debug
-        trap pop_dynamic_debug EXIT INT TERM HUP
         cat <<-EOF > /sys/kernel/debug/dynamic_debug/control
 		file kernel/livepatch/* +p
 		func klp_try_switch_task -p
 		EOF
+}
+
+function set_ftrace_enabled() {
+	local can_fail=0
+	if [[ "$1" == "--fail" ]] ; then
+		can_fail=1
+		shift
+	fi
+
+	local err=$(sysctl -q kernel.ftrace_enabled="$1" 2>&1)
+	local result=$(sysctl --values kernel.ftrace_enabled)
+
+	if [[ "$result" != "$1" ]] ; then
+		if [[ $can_fail -eq 1 ]] ; then
+			echo "livepatch: $err" | sed 's#/proc/sys/kernel/#kernel.#' > /dev/kmsg
+			return
+		fi
+
+		skip "failed to set kernel.ftrace_enabled = $1"
+	fi
+
+	echo "livepatch: kernel.ftrace_enabled = $result" > /dev/kmsg
+}
+
+function cleanup() {
+	pop_config
+}
+
+# setup_config - save the current config and set a script exit trap that
+#		 restores the original config.  Setup the dynamic debug
+#		 for verbose livepatching output and turn on
+#		 the ftrace_enabled sysctl.
+function setup_config() {
+	is_root
+	push_config
+	set_dynamic_debug
+	set_ftrace_enabled 1
+	trap cleanup EXIT INT TERM HUP
 }
 
 # loop_until(cmd) - loop a command until it is successful or $MAX_RETRIES,
@@ -215,18 +265,77 @@ function set_pre_patch_ret {
 		die "failed to set pre_patch_ret parameter for $mod module"
 }
 
+function start_test {
+	local test="$1"
+
+	# Dump something unique into the dmesg log, then stash the entry
+	# in LAST_DMESG.  The check_result() function will use it to
+	# find new kernel messages since the test started.
+	local last_dmesg_msg="livepatch kselftest timestamp: $(date --rfc-3339=ns)"
+	log "$last_dmesg_msg"
+	loop_until 'dmesg | grep -q "$last_dmesg_msg"' ||
+		die "buffer busy? can't find canary dmesg message: $last_dmesg_msg"
+	LAST_DMESG=$(dmesg | grep "$last_dmesg_msg")
+
+	echo -n "TEST: $test ... "
+	log "===== TEST: $test ====="
+}
+
 # check_result() - verify dmesg output
 #	TODO - better filter, out of order msgs, etc?
 function check_result {
 	local expect="$*"
 	local result
 
-	result=$(dmesg | grep -v 'tainting' | grep -e 'livepatch:' -e 'test_klp' | sed 's/^\[[ 0-9.]*\] //')
+	# Test results include any new dmesg entry since LAST_DMESG, then:
+	# - include lines matching keywords
+	# - exclude lines matching keywords
+	# - filter out dmesg timestamp prefixes
+	result=$(dmesg | awk -v last_dmesg="$LAST_DMESG" 'p; $0 == last_dmesg { p=1 }' | \
+		 grep -e 'livepatch:' -e 'test_klp' | \
+		 grep -v '\(tainting\|taints\) kernel' | \
+		 sed 's/^\[[ 0-9.]*\] //')
 
 	if [[ "$expect" == "$result" ]] ; then
 		echo "ok"
+	elif [[ "$result" == "" ]] ; then
+		echo -e "not ok\n\nbuffer overrun? can't find canary dmesg entry: $LAST_DMESG\n"
+		die "livepatch kselftest(s) failed"
 	else
 		echo -e "not ok\n\n$(diff -upr --label expected --label result <(echo "$expect") <(echo "$result"))\n"
 		die "livepatch kselftest(s) failed"
+	fi
+}
+
+# check_sysfs_rights(modname, rel_path, expected_rights) - check sysfs
+# path permissions
+#	modname - livepatch module creating the sysfs interface
+#	rel_path - relative path of the sysfs interface
+#	expected_rights - expected access rights
+function check_sysfs_rights() {
+	local mod="$1"; shift
+	local rel_path="$1"; shift
+	local expected_rights="$1"; shift
+
+	local path="$KLP_SYSFS_DIR/$mod/$rel_path"
+	local rights=$(/bin/stat --format '%A' "$path")
+	if test "$rights" != "$expected_rights" ; then
+		die "Unexpected access rights of $path: $expected_rights vs. $rights"
+	fi
+}
+
+# check_sysfs_value(modname, rel_path, expected_value) - check sysfs value
+#	modname - livepatch module creating the sysfs interface
+#	rel_path - relative path of the sysfs interface
+#	expected_value - expected value read from the file
+function check_sysfs_value() {
+	local mod="$1"; shift
+	local rel_path="$1"; shift
+	local expected_value="$1"; shift
+
+	local path="$KLP_SYSFS_DIR/$mod/$rel_path"
+	local value=`cat $path`
+	if test "$value" != "$expected_value" ; then
+		die "Unexpected value in $path: $expected_value vs. $value"
 	fi
 }

@@ -180,19 +180,19 @@ do {									\
 
 #define emit_loadptr(BASE, STRUCT, FIELD, DEST)				\
 do {	unsigned int _off = offsetof(STRUCT, FIELD);			\
-	BUILD_BUG_ON(FIELD_SIZEOF(STRUCT, FIELD) != sizeof(void *));	\
+	BUILD_BUG_ON(sizeof_field(STRUCT, FIELD) != sizeof(void *));	\
 	*prog++ = LDPTRI | RS1(BASE) | S13(_off) | RD(DEST);		\
 } while (0)
 
 #define emit_load32(BASE, STRUCT, FIELD, DEST)				\
 do {	unsigned int _off = offsetof(STRUCT, FIELD);			\
-	BUILD_BUG_ON(FIELD_SIZEOF(STRUCT, FIELD) != sizeof(u32));	\
+	BUILD_BUG_ON(sizeof_field(STRUCT, FIELD) != sizeof(u32));	\
 	*prog++ = LD32I | RS1(BASE) | S13(_off) | RD(DEST);		\
 } while (0)
 
 #define emit_load16(BASE, STRUCT, FIELD, DEST)				\
 do {	unsigned int _off = offsetof(STRUCT, FIELD);			\
-	BUILD_BUG_ON(FIELD_SIZEOF(STRUCT, FIELD) != sizeof(u16));	\
+	BUILD_BUG_ON(sizeof_field(STRUCT, FIELD) != sizeof(u16));	\
 	*prog++ = LD16I | RS1(BASE) | S13(_off) | RD(DEST);		\
 } while (0)
 
@@ -202,7 +202,7 @@ do {	unsigned int _off = offsetof(STRUCT, FIELD);			\
 } while (0)
 
 #define emit_load8(BASE, STRUCT, FIELD, DEST)				\
-do {	BUILD_BUG_ON(FIELD_SIZEOF(STRUCT, FIELD) != sizeof(u8));	\
+do {	BUILD_BUG_ON(sizeof_field(STRUCT, FIELD) != sizeof(u8));	\
 	__emit_load8(BASE, STRUCT, FIELD, DEST);			\
 } while (0)
 
@@ -491,7 +491,7 @@ void bpf_jit_compile(struct bpf_prog *fp)
 				} else {
 					emit_loadimm(K, r_A);
 				}
-				/* Fallthrough */
+				fallthrough;
 			case BPF_RET | BPF_A:
 				if (seen_or_pass0) {
 					if (i != flen - 1) {
@@ -555,11 +555,11 @@ void bpf_jit_compile(struct bpf_prog *fp)
 				emit_skb_load16(vlan_tci, r_A);
 				break;
 			case BPF_ANC | SKF_AD_VLAN_TAG_PRESENT:
-				__emit_skb_load8(__pkt_vlan_present_offset, r_A);
-				if (PKT_VLAN_PRESENT_BIT)
-					emit_alu_K(SRL, PKT_VLAN_PRESENT_BIT);
-				if (PKT_VLAN_PRESENT_BIT < 7)
-					emit_andi(r_A, 1, r_A);
+				emit_skb_load32(vlan_all, r_A);
+				emit_cmpi(r_A, 0);
+				emit_branch_off(BE, 12);
+				emit_nop();
+				emit_loadimm(1, r_A);
 				break;
 			case BPF_LD | BPF_W | BPF_LEN:
 				emit_skb_load32(len, r_A);

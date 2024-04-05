@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * NBUS driver for TS-4600 based boards
  *
  * Copyright (c) 2016 - Savoir-faire Linux
  * Author: Sebastien Bourdelin <sebastien.bourdelin@savoirfairelinux.com>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  *
  * This driver implements a GPIOs bit-banged bus, called the NBUS by Technologic
  * Systems. It is used to communicate with the peripherals in the FPGA on the
@@ -334,7 +331,7 @@ static int ts_nbus_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int ts_nbus_remove(struct platform_device *pdev)
+static void ts_nbus_remove(struct platform_device *pdev)
 {
 	struct ts_nbus *ts_nbus = dev_get_drvdata(&pdev->dev);
 
@@ -342,8 +339,6 @@ static int ts_nbus_remove(struct platform_device *pdev)
 	mutex_lock(&ts_nbus->lock);
 	pwm_disable(ts_nbus->pwm);
 	mutex_unlock(&ts_nbus->lock);
-
-	return 0;
 }
 
 static const struct of_device_id ts_nbus_of_match[] = {
@@ -354,7 +349,7 @@ MODULE_DEVICE_TABLE(of, ts_nbus_of_match);
 
 static struct platform_driver ts_nbus_driver = {
 	.probe		= ts_nbus_probe,
-	.remove		= ts_nbus_remove,
+	.remove_new	= ts_nbus_remove,
 	.driver		= {
 		.name	= "ts_nbus",
 		.of_match_table = ts_nbus_of_match,

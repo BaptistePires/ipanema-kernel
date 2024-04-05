@@ -206,7 +206,7 @@ static int v1_write_file_info(struct super_block *sb, int type)
 	      sizeof(struct v1_disk_dqblk), v1_dqoff(0));
 	if (ret == sizeof(struct v1_disk_dqblk))
 		ret = 0;
-	else if (ret > 0)
+	else if (ret >= 0)
 		ret = -EIO;
 out:
 	up_write(&dqopt->dqio_sem);
@@ -217,7 +217,6 @@ static const struct quota_format_ops v1_format_ops = {
 	.check_quota_file	= v1_check_quota_file,
 	.read_file_info		= v1_read_file_info,
 	.write_file_info	= v1_write_file_info,
-	.free_file_info		= NULL,
 	.read_dqblk		= v1_read_dqblk,
 	.commit_dqblk		= v1_commit_dqblk,
 };

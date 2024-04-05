@@ -5,6 +5,7 @@
  * Copyright (c) 2001-2015 Anton Altaparmakov and Tuxera Inc.
  */
 
+#include <linux/blkdev.h>
 #include <linux/backing-dev.h>
 #include <linux/buffer_head.h>
 #include <linux/gfp.h>
@@ -218,11 +219,6 @@ do_non_resident_extend:
 			err = PTR_ERR(page);
 			goto init_err_out;
 		}
-		if (unlikely(PageError(page))) {
-			put_page(page);
-			err = -EIO;
-			goto init_err_out;
-		}
 		/*
 		 * Update the initialized size in the ntfs inode.  This is
 		 * enough to make ntfs_writepage() work.
@@ -250,14 +246,14 @@ do_non_resident_extend:
 		 *
 		 * TODO: For sparse pages could optimize this workload by using
 		 * the FsMisc / MiscFs page bit as a "PageIsSparse" bit.  This
-		 * would be set in readpage for sparse pages and here we would
+		 * would be set in read_folio for sparse pages and here we would
 		 * not need to mark dirty any pages which have this bit set.
 		 * The only caveat is that we have to clear the bit everywhere
 		 * where we allocate any clusters that lie in the page or that
 		 * contain the page.
 		 *
 		 * TODO: An even greater optimization would be for us to only
-		 * call readpage() on pages which are not in sparse regions as
+		 * call read_folio() on pages which are not in sparse regions as
 		 * determined from the runlist.  This would greatly reduce the
 		 * number of pages we read and make dirty in the case of sparse
 		 * files.
@@ -323,7 +319,7 @@ static ssize_t ntfs_prepare_file_for_write(struct kiocb *iocb,
 	unsigned long flags;
 	struct file *file = iocb->ki_filp;
 	struct inode *vi = file_inode(file);
-	ntfs_inode *base_ni, *ni = NTFS_I(vi);
+	ntfs_inode *ni = NTFS_I(vi);
 	ntfs_volume *vol = ni->vol;
 
 	ntfs_debug("Entering for i_ino 0x%lx, attribute type 0x%x, pos "
@@ -365,9 +361,6 @@ static ssize_t ntfs_prepare_file_for_write(struct kiocb *iocb,
 		err = -EOPNOTSUPP;
 		goto out;
 	}
-	base_ni = ni;
-	if (NInoAttr(ni))
-		base_ni = ni->ext.base_ntfs_ino;
 	err = file_remove_privs(file);
 	if (unlikely(err))
 		goto out;
@@ -534,12 +527,12 @@ err_out:
 	goto out;
 }
 
-static inline int ntfs_submit_bh_for_read(struct buffer_head *bh)
+static inline void ntfs_submit_bh_for_read(struct buffer_head *bh)
 {
 	lock_buffer(bh);
 	get_bh(bh);
 	bh->b_end_io = end_buffer_read_sync;
-	return submit_bh(REQ_OP_READ, 0, bh);
+	submit_bh(REQ_OP_READ, bh);
 }
 
 /**
@@ -574,7 +567,7 @@ static int ntfs_prepare_pages_for_non_resident_write(struct page **pages,
 	LCN lcn;
 	s64 bh_pos, vcn_len, end, initialized_size;
 	sector_t lcn_block;
-	struct page *page;
+	struct folio *folio;
 	struct inode *vi;
 	ntfs_inode *ni, *base_ni = NULL;
 	ntfs_volume *vol;
@@ -608,20 +601,6 @@ static int ntfs_prepare_pages_for_non_resident_write(struct page **pages,
 			(long long)pos, bytes);
 	blocksize = vol->sb->s_blocksize;
 	blocksize_bits = vol->sb->s_blocksize_bits;
-	u = 0;
-	do {
-		page = pages[u];
-		BUG_ON(!page);
-		/*
-		 * create_empty_buffers() will create uptodate/dirty buffers if
-		 * the page is uptodate/dirty.
-		 */
-		if (!page_has_buffers(page)) {
-			create_empty_buffers(page, blocksize, 0);
-			if (unlikely(!page_has_buffers(page)))
-				return -ENOMEM;
-		}
-	} while (++u < nr_pages);
 	rl_write_locked = false;
 	rl = NULL;
 	err = 0;
@@ -633,14 +612,21 @@ static int ntfs_prepare_pages_for_non_resident_write(struct page **pages,
 	end = pos + bytes;
 	cend = (end + vol->cluster_size - 1) >> vol->cluster_size_bits;
 	/*
-	 * Loop over each page and for each page over each buffer.  Use goto to
+	 * Loop over each buffer in each folio.  Use goto to
 	 * reduce indentation.
 	 */
 	u = 0;
-do_next_page:
-	page = pages[u];
-	bh_pos = (s64)page->index << PAGE_SHIFT;
-	bh = head = page_buffers(page);
+do_next_folio:
+	folio = page_folio(pages[u]);
+	bh_pos = folio_pos(folio);
+	head = folio_buffers(folio);
+	if (!head)
+		/*
+		 * create_empty_buffers() will create uptodate/dirty
+		 * buffers if the folio is uptodate/dirty.
+		 */
+		head = create_empty_buffers(folio, blocksize, 0);
+	bh = head;
 	do {
 		VCN cdelta;
 		s64 bh_end;
@@ -660,15 +646,15 @@ do_next_page:
 			if (buffer_uptodate(bh))
 				continue;
 			/*
-			 * The buffer is not uptodate.  If the page is uptodate
+			 * The buffer is not uptodate.  If the folio is uptodate
 			 * set the buffer uptodate and otherwise ignore it.
 			 */
-			if (PageUptodate(page)) {
+			if (folio_test_uptodate(folio)) {
 				set_buffer_uptodate(bh);
 				continue;
 			}
 			/*
-			 * Neither the page nor the buffer are uptodate.  If
+			 * Neither the folio nor the buffer are uptodate.  If
 			 * the buffer is only partially being written to, we
 			 * need to read it in before the write, i.e. now.
 			 */
@@ -686,7 +672,7 @@ do_next_page:
 					ntfs_submit_bh_for_read(bh);
 					*wait_bh++ = bh;
 				} else {
-					zero_user(page, bh_offset(bh),
+					folio_zero_range(folio, bh_offset(bh),
 							blocksize);
 					set_buffer_uptodate(bh);
 				}
@@ -713,7 +699,7 @@ map_buffer_cached:
 					(bh_cofs >> blocksize_bits);
 			set_buffer_mapped(bh);
 			/*
-			 * If the page is uptodate so is the buffer.  If the
+			 * If the folio is uptodate so is the buffer.  If the
 			 * buffer is fully outside the write, we ignore it if
 			 * it was already allocated and we mark it dirty so it
 			 * gets written out if we allocated it.  On the other
@@ -721,7 +707,7 @@ map_buffer_cached:
 			 * marking it dirty we set buffer_new so we can do
 			 * error recovery.
 			 */
-			if (PageUptodate(page)) {
+			if (folio_test_uptodate(folio)) {
 				if (!buffer_uptodate(bh))
 					set_buffer_uptodate(bh);
 				if (unlikely(was_hole)) {
@@ -761,7 +747,8 @@ map_buffer_cached:
 						ntfs_submit_bh_for_read(bh);
 						*wait_bh++ = bh;
 					} else {
-						zero_user(page, bh_offset(bh),
+						folio_zero_range(folio,
+								bh_offset(bh),
 								blocksize);
 						set_buffer_uptodate(bh);
 					}
@@ -780,7 +767,7 @@ map_buffer_cached:
 			 */
 			if (bh_end <= pos || bh_pos >= end) {
 				if (!buffer_uptodate(bh)) {
-					zero_user(page, bh_offset(bh),
+					folio_zero_range(folio, bh_offset(bh),
 							blocksize);
 					set_buffer_uptodate(bh);
 				}
@@ -793,7 +780,7 @@ map_buffer_cached:
 				u8 *kaddr;
 				unsigned pofs;
 					
-				kaddr = kmap_atomic(page);
+				kaddr = kmap_local_folio(folio, 0);
 				if (bh_pos < pos) {
 					pofs = bh_pos & ~PAGE_MASK;
 					memset(kaddr + pofs, 0, pos - bh_pos);
@@ -802,8 +789,8 @@ map_buffer_cached:
 					pofs = end & ~PAGE_MASK;
 					memset(kaddr + pofs, 0, bh_end - end);
 				}
-				kunmap_atomic(kaddr);
-				flush_dcache_page(page);
+				kunmap_local(kaddr);
+				flush_dcache_folio(folio);
 			}
 			continue;
 		}
@@ -816,11 +803,12 @@ map_buffer_cached:
 		initialized_size = ni->allocated_size;
 		read_unlock_irqrestore(&ni->size_lock, flags);
 		if (bh_pos > initialized_size) {
-			if (PageUptodate(page)) {
+			if (folio_test_uptodate(folio)) {
 				if (!buffer_uptodate(bh))
 					set_buffer_uptodate(bh);
 			} else if (!buffer_uptodate(bh)) {
-				zero_user(page, bh_offset(bh), blocksize);
+				folio_zero_range(folio, bh_offset(bh),
+						blocksize);
 				set_buffer_uptodate(bh);
 			}
 			continue;
@@ -934,17 +922,17 @@ rl_not_mapped_enoent:
 				bh->b_blocknr = -1;
 				/*
 				 * If the buffer is uptodate we skip it.  If it
-				 * is not but the page is uptodate, we can set
-				 * the buffer uptodate.  If the page is not
+				 * is not but the folio is uptodate, we can set
+				 * the buffer uptodate.  If the folio is not
 				 * uptodate, we can clear the buffer and set it
 				 * uptodate.  Whether this is worthwhile is
 				 * debatable and this could be removed.
 				 */
-				if (PageUptodate(page)) {
+				if (folio_test_uptodate(folio)) {
 					if (!buffer_uptodate(bh))
 						set_buffer_uptodate(bh);
 				} else if (!buffer_uptodate(bh)) {
-					zero_user(page, bh_offset(bh),
+					folio_zero_range(folio, bh_offset(bh),
 						blocksize);
 					set_buffer_uptodate(bh);
 				}
@@ -1174,7 +1162,7 @@ rl_not_mapped_enoent:
 	} while (bh_pos += blocksize, (bh = bh->b_this_page) != head);
 	/* If there are no errors, do the next page. */
 	if (likely(!err && ++u < nr_pages))
-		goto do_next_page;
+		goto do_next_folio;
 	/* If there are no errors, release the runlist lock if we took it. */
 	if (likely(!err)) {
 		if (unlikely(rl_write_locked)) {
@@ -1192,9 +1180,8 @@ rl_not_mapped_enoent:
 		bh = *--wait_bh;
 		wait_on_buffer(bh);
 		if (likely(buffer_uptodate(bh))) {
-			page = bh->b_page;
-			bh_pos = ((s64)page->index << PAGE_SHIFT) +
-					bh_offset(bh);
+			folio = bh->b_folio;
+			bh_pos = folio_pos(folio) + bh_offset(bh);
 			/*
 			 * If the buffer overflows the initialized size, need
 			 * to zero the overflowing region.
@@ -1204,7 +1191,7 @@ rl_not_mapped_enoent:
 
 				if (likely(bh_pos < initialized_size))
 					ofs = initialized_size - bh_pos;
-				zero_user_segment(page, bh_offset(bh) + ofs,
+				folio_zero_segment(folio, bh_offset(bh) + ofs,
 						blocksize);
 			}
 		} else /* if (unlikely(!buffer_uptodate(bh))) */
@@ -1331,21 +1318,20 @@ rl_not_mapped_enoent:
 	u = 0;
 	end = bh_cpos << vol->cluster_size_bits;
 	do {
-		page = pages[u];
-		bh = head = page_buffers(page);
+		folio = page_folio(pages[u]);
+		bh = head = folio_buffers(folio);
 		do {
 			if (u == nr_pages &&
-					((s64)page->index << PAGE_SHIFT) +
-					bh_offset(bh) >= end)
+			    folio_pos(folio) + bh_offset(bh) >= end)
 				break;
 			if (!buffer_new(bh))
 				continue;
 			clear_buffer_new(bh);
 			if (!buffer_uptodate(bh)) {
-				if (PageUptodate(page))
+				if (folio_test_uptodate(folio))
 					set_buffer_uptodate(bh);
 				else {
-					zero_user(page, bh_offset(bh),
+					folio_zero_range(folio, bh_offset(bh),
 							blocksize);
 					set_buffer_uptodate(bh);
 				}
@@ -1687,20 +1673,17 @@ static size_t ntfs_copy_from_user_iter(struct page **pages, unsigned nr_pages,
 {
 	struct page **last_page = pages + nr_pages;
 	size_t total = 0;
-	struct iov_iter data = *i;
 	unsigned len, copied;
 
 	do {
 		len = PAGE_SIZE - ofs;
 		if (len > bytes)
 			len = bytes;
-		copied = iov_iter_copy_from_user_atomic(*pages, &data, ofs,
-				len);
+		copied = copy_page_from_iter_atomic(*pages, ofs, len, i);
 		total += copied;
 		bytes -= copied;
 		if (!bytes)
 			break;
-		iov_iter_advance(&data, copied);
 		if (copied < len)
 			goto err;
 		ofs = 0;
@@ -1777,11 +1760,11 @@ static ssize_t ntfs_perform_write(struct file *file, struct iov_iter *i,
 	last_vcn = -1;
 	do {
 		VCN vcn;
-		pgoff_t idx, start_idx;
+		pgoff_t start_idx;
 		unsigned ofs, do_pages, u;
 		size_t copied;
 
-		start_idx = idx = pos >> PAGE_SHIFT;
+		start_idx = pos >> PAGE_SHIFT;
 		ofs = pos & ~PAGE_MASK;
 		bytes = PAGE_SIZE - ofs;
 		do_pages = 1;
@@ -1835,7 +1818,7 @@ again:
 		 * pages being swapped out between us bringing them into memory
 		 * and doing the actual copying.
 		 */
-		if (unlikely(iov_iter_fault_in_readable(i, bytes))) {
+		if (unlikely(fault_in_iov_iter_readable(i, bytes))) {
 			status = -EFAULT;
 			break;
 		}
@@ -1869,34 +1852,24 @@ again:
 		if (likely(copied == bytes)) {
 			status = ntfs_commit_pages_after_write(pages, do_pages,
 					pos, bytes);
-			if (!status)
-				status = bytes;
 		}
 		do {
 			unlock_page(pages[--do_pages]);
 			put_page(pages[do_pages]);
 		} while (do_pages);
-		if (unlikely(status < 0))
+		if (unlikely(status < 0)) {
+			iov_iter_revert(i, copied);
 			break;
-		copied = status;
+		}
 		cond_resched();
-		if (unlikely(!copied)) {
-			size_t sc;
-
-			/*
-			 * We failed to copy anything.  Fall back to single
-			 * segment length write.
-			 *
-			 * This is needed to avoid possible livelock in the
-			 * case that all segments in the iov cannot be copied
-			 * at once without a pagefault.
-			 */
-			sc = iov_iter_single_seg_count(i);
-			if (bytes > sc)
-				bytes = sc;
+		if (unlikely(copied < bytes)) {
+			iov_iter_revert(i, copied);
+			if (copied)
+				bytes = copied;
+			else if (bytes > PAGE_SIZE - ofs)
+				bytes = PAGE_SIZE - ofs;
 			goto again;
 		}
-		iov_iter_advance(i, copied);
 		pos += copied;
 		written += copied;
 		balance_dirty_pages_ratelimited(mapping);
@@ -1931,11 +1904,9 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 	inode_lock(vi);
 	/* We can write back this queue in page reclaim. */
-	current->backing_dev_info = inode_to_bdi(vi);
 	err = ntfs_prepare_file_for_write(iocb, from);
 	if (iov_iter_count(from) && !err)
 		written = ntfs_perform_write(file, from, iocb->ki_pos);
-	current->backing_dev_info = NULL;
 	inode_unlock(vi);
 	iocb->ki_pos += written;
 	if (likely(written > 0))
@@ -2012,7 +1983,7 @@ const struct file_operations ntfs_file_ops = {
 #endif /* NTFS_RW */
 	.mmap		= generic_file_mmap,
 	.open		= ntfs_file_open,
-	.splice_read	= generic_file_splice_read,
+	.splice_read	= filemap_splice_read,
 };
 
 const struct inode_operations ntfs_file_inode_ops = {

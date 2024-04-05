@@ -1,49 +1,54 @@
-========================================
-The Linux driver implementer's API guide
-========================================
+.. SPDX-License-Identifier: GPL-2.0
+
+==============================
+Driver implementer's API guide
+==============================
 
 The kernel offers a wide variety of interfaces to support the development
 of device drivers.  This document is an only somewhat organized collection
 of some of those interfaces — it will hopefully get better over time!  The
 available subsections can be seen below.
 
-.. class:: toc-title
-
-	   Table of contents
-
 .. toctree::
+   :caption: Table of contents
    :maxdepth: 2
 
    driver-model/index
    basics
    infrastructure
+   ioctl
    early-userspace/index
    pm/index
    clk
    device-io
-   device_connection
    dma-buf
    device_link
    component
    message-based
-   sound
+   infiniband
+   aperture
    frame-buffer
    regulator
+   reset
    iio/index
    input
    usb/index
    firewire
    pci/index
+   cxl/index
    spi
    i2c
    ipmb
+   ipmi
    i3c/index
    interconnect
+   devfreq
    hsi
    edac
    scsi
    libata
    target
+   mailbox
    mtdnand
    miscellaneous
    mei/index
@@ -57,9 +62,10 @@ available subsections can be seen below.
    80211/index
    uio-howto
    firmware/index
-   pinctl
+   pin-control
    gpio/index
    md/index
+   media/index
    misc_devices
    nfc/index
    dmaengine/index
@@ -68,19 +74,15 @@ available subsections can be seen below.
    thermal/index
    fpga/index
    acpi/index
+   auxiliary_bus
    backlight/lp855x-driver.rst
-   bt8xxgpio
    connector
    console
-   dcdbas
-   dell_rbu
-   edid
    eisa
-   ipmb
    isa
-   isapnp
+   io-mapping
+   io_ordering
    generic-counter
-   lightnvm-pblk
    memory-devices/index
    men-chameleon-bus
    ntb
@@ -89,20 +91,28 @@ available subsections can be seen below.
    pps
    ptp
    phy/index
-   pti_intel_mid
    pwm
+   pldmfw/index
    rfkill
    serial/index
-   sgi-ioc4
    sm501
-   smsc_ece1099
+   surface_aggregator/index
    switchtec
    sync_file
+   tty/index
    vfio-mediated-device
    vfio
+   vfio-pci-device-specific-driver-acceptance
+   virtio/index
    xilinx/index
    xillybus
    zorro
+   hte/index
+   wmi
+   dpll
+   wbrf
+   crypto/index
+   tee
 
 .. only::  subproject and html
 

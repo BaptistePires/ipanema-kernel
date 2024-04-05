@@ -73,17 +73,13 @@ static int hisi_rng_read(struct hwrng *rng, void *buf, size_t max, bool wait)
 static int hisi_rng_probe(struct platform_device *pdev)
 {
 	struct hisi_rng *rng;
-	struct resource *res;
 	int ret;
 
 	rng = devm_kzalloc(&pdev->dev, sizeof(*rng), GFP_KERNEL);
 	if (!rng)
 		return -ENOMEM;
 
-	platform_set_drvdata(pdev, rng);
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	rng->base = devm_ioremap_resource(&pdev->dev, res);
+	rng->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(rng->base))
 		return PTR_ERR(rng->base);
 
@@ -101,7 +97,7 @@ static int hisi_rng_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id hisi_rng_dt_ids[] = {
+static const struct of_device_id hisi_rng_dt_ids[] __maybe_unused = {
 	{ .compatible = "hisilicon,hip04-rng" },
 	{ .compatible = "hisilicon,hip05-rng" },
 	{ }

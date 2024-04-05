@@ -99,9 +99,10 @@ struct budget_ci {
 	u8 tuner_pll_address; /* used for philips_tdm1316l configs */
 };
 
-static void msp430_ir_interrupt(unsigned long data)
+static void msp430_ir_interrupt(struct tasklet_struct *t)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) data;
+	struct budget_ci_ir *ir = from_tasklet(ir, t, msp430_irq_tasklet);
+	struct budget_ci *budget_ci = container_of(ir, typeof(*budget_ci), ir);
 	struct rc_dev *dev = budget_ci->ir.dev;
 	u32 command = ttpci_budget_debiread(&budget_ci->budget, DEBINOSWAP, DEBIADDR_IR, 2, 1, 0) >> 8;
 
@@ -229,8 +230,7 @@ static int msp430_ir_init(struct budget_ci *budget_ci)
 
 	budget_ci->ir.dev = dev;
 
-	tasklet_init(&budget_ci->ir.msp430_irq_tasklet, msp430_ir_interrupt,
-		     (unsigned long) budget_ci);
+	tasklet_setup(&budget_ci->ir.msp430_irq_tasklet, msp430_ir_interrupt);
 
 	SAA7146_IER_ENABLE(saa, MASK_06);
 	saa7146_setgpio(saa, 3, SAA7146_GPIO_IRQHI);
@@ -251,7 +251,7 @@ static void msp430_ir_deinit(struct budget_ci *budget_ci)
 
 static int ciintf_read_attribute_mem(struct dvb_ca_en50221 *ca, int slot, int address)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) ca->data;
+	struct budget_ci *budget_ci = ca->data;
 
 	if (slot != 0)
 		return -EINVAL;
@@ -262,7 +262,7 @@ static int ciintf_read_attribute_mem(struct dvb_ca_en50221 *ca, int slot, int ad
 
 static int ciintf_write_attribute_mem(struct dvb_ca_en50221 *ca, int slot, int address, u8 value)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) ca->data;
+	struct budget_ci *budget_ci = ca->data;
 
 	if (slot != 0)
 		return -EINVAL;
@@ -273,7 +273,7 @@ static int ciintf_write_attribute_mem(struct dvb_ca_en50221 *ca, int slot, int a
 
 static int ciintf_read_cam_control(struct dvb_ca_en50221 *ca, int slot, u8 address)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) ca->data;
+	struct budget_ci *budget_ci = ca->data;
 
 	if (slot != 0)
 		return -EINVAL;
@@ -284,7 +284,7 @@ static int ciintf_read_cam_control(struct dvb_ca_en50221 *ca, int slot, u8 addre
 
 static int ciintf_write_cam_control(struct dvb_ca_en50221 *ca, int slot, u8 address, u8 value)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) ca->data;
+	struct budget_ci *budget_ci = ca->data;
 
 	if (slot != 0)
 		return -EINVAL;
@@ -295,7 +295,7 @@ static int ciintf_write_cam_control(struct dvb_ca_en50221 *ca, int slot, u8 addr
 
 static int ciintf_slot_reset(struct dvb_ca_en50221 *ca, int slot)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) ca->data;
+	struct budget_ci *budget_ci = ca->data;
 	struct saa7146_dev *saa = budget_ci->budget.dev;
 
 	if (slot != 0)
@@ -318,7 +318,7 @@ static int ciintf_slot_reset(struct dvb_ca_en50221 *ca, int slot)
 
 static int ciintf_slot_shutdown(struct dvb_ca_en50221 *ca, int slot)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) ca->data;
+	struct budget_ci *budget_ci = ca->data;
 	struct saa7146_dev *saa = budget_ci->budget.dev;
 
 	if (slot != 0)
@@ -331,7 +331,7 @@ static int ciintf_slot_shutdown(struct dvb_ca_en50221 *ca, int slot)
 
 static int ciintf_slot_ts_enable(struct dvb_ca_en50221 *ca, int slot)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) ca->data;
+	struct budget_ci *budget_ci = ca->data;
 	struct saa7146_dev *saa = budget_ci->budget.dev;
 	int tmp;
 
@@ -348,9 +348,10 @@ static int ciintf_slot_ts_enable(struct dvb_ca_en50221 *ca, int slot)
 	return 0;
 }
 
-static void ciintf_interrupt(unsigned long data)
+static void ciintf_interrupt(struct tasklet_struct *t)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) data;
+	struct budget_ci *budget_ci = from_tasklet(budget_ci, t,
+						   ciintf_irq_tasklet);
 	struct saa7146_dev *saa = budget_ci->budget.dev;
 	unsigned int flags;
 
@@ -399,7 +400,7 @@ static void ciintf_interrupt(unsigned long data)
 
 static int ciintf_poll_slot_status(struct dvb_ca_en50221 *ca, int slot, int open)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) ca->data;
+	struct budget_ci *budget_ci = ca->data;
 	unsigned int flags;
 
 	// ensure we don't get spurious IRQs during initialisation
@@ -491,7 +492,7 @@ static int ciintf_init(struct budget_ci *budget_ci)
 
 	// Setup CI slot IRQ
 	if (budget_ci->ci_irq) {
-		tasklet_init(&budget_ci->ciintf_irq_tasklet, ciintf_interrupt, (unsigned long) budget_ci);
+		tasklet_setup(&budget_ci->ciintf_irq_tasklet, ciintf_interrupt);
 		if (budget_ci->slot_status != SLOTSTATUS_NONE) {
 			saa7146_setgpio(saa, 0, SAA7146_GPIO_IRQLO);
 		} else {
@@ -552,7 +553,7 @@ static void ciintf_deinit(struct budget_ci *budget_ci)
 
 static void budget_ci_irq(struct saa7146_dev *dev, u32 * isr)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) dev->ext_priv;
+	struct budget_ci *budget_ci = dev->ext_priv;
 
 	dprintk(8, "dev: %p, budget_ci: %p\n", dev, budget_ci);
 
@@ -647,7 +648,7 @@ static int philips_su1278_tt_set_symbol_rate(struct dvb_frontend *fe, u32 srate,
 static int philips_su1278_tt_tuner_set_params(struct dvb_frontend *fe)
 {
 	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
-	struct budget_ci *budget_ci = (struct budget_ci *) fe->dvb->priv;
+	struct budget_ci *budget_ci = fe->dvb->priv;
 	u32 div;
 	u8 buf[4];
 	struct i2c_msg msg = {.addr = 0x60,.flags = 0,.buf = buf,.len = sizeof(buf) };
@@ -697,7 +698,7 @@ static const struct stv0299_config philips_su1278_tt_config = {
 
 static int philips_tdm1316l_tuner_init(struct dvb_frontend *fe)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) fe->dvb->priv;
+	struct budget_ci *budget_ci = fe->dvb->priv;
 	static u8 td1316_init[] = { 0x0b, 0xf5, 0x85, 0xab };
 	static u8 disable_mc44BC374c[] = { 0x1d, 0x74, 0xa0, 0x68 };
 	struct i2c_msg tuner_msg = {.addr = budget_ci->tuner_pll_address,.flags = 0,.buf = td1316_init,.len =
@@ -728,7 +729,7 @@ static int philips_tdm1316l_tuner_init(struct dvb_frontend *fe)
 static int philips_tdm1316l_tuner_set_params(struct dvb_frontend *fe)
 {
 	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
-	struct budget_ci *budget_ci = (struct budget_ci *) fe->dvb->priv;
+	struct budget_ci *budget_ci = fe->dvb->priv;
 	u8 tuner_buf[4];
 	struct i2c_msg tuner_msg = {.addr = budget_ci->tuner_pll_address,.flags = 0,.buf = tuner_buf,.len = sizeof(tuner_buf) };
 	int tuner_frequency = 0;
@@ -814,7 +815,7 @@ static int philips_tdm1316l_tuner_set_params(struct dvb_frontend *fe)
 static int philips_tdm1316l_request_firmware(struct dvb_frontend *fe,
 					     const struct firmware **fw, char *name)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) fe->dvb->priv;
+	struct budget_ci *budget_ci = fe->dvb->priv;
 
 	return request_firmware(fw, name, &budget_ci->budget.dev->pci->dev);
 }
@@ -844,7 +845,7 @@ static struct tda1004x_config philips_tdm1316l_config_invert = {
 static int dvbc_philips_tdm1316l_tuner_set_params(struct dvb_frontend *fe)
 {
 	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
-	struct budget_ci *budget_ci = (struct budget_ci *) fe->dvb->priv;
+	struct budget_ci *budget_ci = fe->dvb->priv;
 	u8 tuner_buf[5];
 	struct i2c_msg tuner_msg = {.addr = budget_ci->tuner_pll_address,
 				    .flags = 0,
@@ -1493,7 +1494,7 @@ out1:
 
 static int budget_ci_detach(struct saa7146_dev *dev)
 {
-	struct budget_ci *budget_ci = (struct budget_ci *) dev->ext_priv;
+	struct budget_ci *budget_ci = dev->ext_priv;
 	struct saa7146_dev *saa = budget_ci->budget.dev;
 	int err;
 

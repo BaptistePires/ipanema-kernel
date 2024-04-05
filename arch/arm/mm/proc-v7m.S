@@ -9,7 +9,7 @@
  */
 #include <linux/linkage.h>
 #include <asm/assembler.h>
-#include <asm/memory.h>
+#include <asm/page.h>
 #include <asm/v7m.h>
 #include "proc-macros.S"
 
@@ -93,7 +93,7 @@ ENTRY(cpu_cm7_proc_fin)
 	ret	lr
 ENDPROC(cpu_cm7_proc_fin)
 
-	.section ".init.text", #alloc, #execinstr
+	.section ".init.text", "ax"
 
 __v7m_cm7_setup:
 	mov	r8, #(V7M_SCB_CCR_DC | V7M_SCB_CCR_IC| V7M_SCB_CCR_BP)
@@ -177,7 +177,7 @@ ENDPROC(__v7m_setup)
 	string cpu_elf_name "v7m"
 	string cpu_v7m_name "ARMv7-M"
 
-	.section ".proc.info.init", #alloc
+	.section ".proc.info.init", "a"
 
 .macro __v7m_proc name, initfunc, cache_fns = nop_cache_fns, hwcaps = 0,  proc_fns = v7m_processor_functions
 	.long	0			/* proc_info_list.__cpu_mm_mmu_flags */
@@ -192,6 +192,26 @@ ENDPROC(__v7m_setup)
 	.long	0			/* proc_info_list.user */
 	.long	\cache_fns
 .endm
+
+	/*
+	 * Match ARM Cortex-M55 processor.
+	 */
+	.type	__v7m_cm55_proc_info, #object
+__v7m_cm55_proc_info:
+	.long	0x410fd220		/* ARM Cortex-M55 0xD22 */
+	.long	0xff0ffff0		/* Mask off revision, patch release */
+	__v7m_proc __v7m_cm55_proc_info, __v7m_cm7_setup, hwcaps = HWCAP_EDSP, cache_fns = v7m_cache_fns, proc_fns = cm7_processor_functions
+	.size	__v7m_cm55_proc_info, . - __v7m_cm55_proc_info
+
+	/*
+	 * Match ARM Cortex-M33 processor.
+	 */
+	.type	__v7m_cm33_proc_info, #object
+__v7m_cm33_proc_info:
+	.long	0x410fd210		/* ARM Cortex-M33 0xD21 */
+	.long	0xff0ffff0		/* Mask off revision, patch release */
+	__v7m_proc __v7m_cm33_proc_info, __v7m_setup, hwcaps = HWCAP_EDSP
+	.size	__v7m_cm33_proc_info, . - __v7m_cm33_proc_info
 
 	/*
 	 * Match ARM Cortex-M7 processor.

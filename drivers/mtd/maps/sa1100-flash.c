@@ -34,7 +34,7 @@ struct sa_subdev_info {
 struct sa_info {
 	struct mtd_info		*mtd;
 	int			num_subdev;
-	struct sa_subdev_info	subdev[0];
+	struct sa_subdev_info	subdev[];
 };
 
 static DEFINE_SPINLOCK(sa1100_vpp_lock);
@@ -81,8 +81,7 @@ static int sa1100_probe_subdev(struct sa_subdev_info *subdev, struct resource *r
 	default:
 		printk(KERN_WARNING "SA1100 flash: unknown base address "
 		       "0x%08lx, assuming CS0\n", phys);
-		/* Fall through */
-
+		fallthrough;
 	case SA1100_CS0_PHYS:
 		subdev->map.bankwidth = (MSC0 & MSC_RBW) ? 2 : 4;
 		break;
@@ -286,19 +285,17 @@ static int sa1100_mtd_probe(struct platform_device *pdev)
 	return err;
 }
 
-static int sa1100_mtd_remove(struct platform_device *pdev)
+static void sa1100_mtd_remove(struct platform_device *pdev)
 {
 	struct sa_info *info = platform_get_drvdata(pdev);
 	struct flash_platform_data *plat = dev_get_platdata(&pdev->dev);
 
 	sa1100_destroy(info, plat);
-
-	return 0;
 }
 
 static struct platform_driver sa1100_mtd_driver = {
 	.probe		= sa1100_mtd_probe,
-	.remove		= sa1100_mtd_remove,
+	.remove_new	= sa1100_mtd_remove,
 	.driver		= {
 		.name	= "sa1100-mtd",
 	},

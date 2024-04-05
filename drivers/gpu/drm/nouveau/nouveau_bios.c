@@ -27,6 +27,8 @@
 #include "dispnv04/hw.h"
 #include "nouveau_encoder.h"
 
+#include <subdev/gsp.h>
+
 #include <linux/io-mapping.h>
 #include <linux/firmware.h>
 
@@ -110,6 +112,9 @@ static int call_lvds_manufacturer_script(struct drm_device *dev, struct dcb_outp
 	struct nvbios *bios = &drm->vbios;
 	uint8_t sub = bios->data[bios->fp.xlated_entry + script] + (bios->fp.link_c_increment && dcbent->or & DCB_OUTPUT_C ? 1 : 0);
 	uint16_t scriptofs = ROM16(bios->data[bios->init_script_tbls_ptr + sub * 2]);
+#ifdef __powerpc__
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
+#endif
 
 	if (!bios->fp.xlated_entry || !sub || !scriptofs)
 		return -EINVAL;
@@ -123,8 +128,8 @@ static int call_lvds_manufacturer_script(struct drm_device *dev, struct dcb_outp
 #ifdef __powerpc__
 	/* Powerbook specific quirks */
 	if (script == LVDS_RESET &&
-	    (dev->pdev->device == 0x0179 || dev->pdev->device == 0x0189 ||
-	     dev->pdev->device == 0x0329))
+	    (pdev->device == 0x0179 || pdev->device == 0x0189 ||
+	     pdev->device == 0x0329))
 		nv_write_tmds(dev, dcbent->or, 0, 0x02, 0x72);
 #endif
 
@@ -1798,6 +1803,8 @@ parse_dcb_entry(struct drm_device *dev, void *data, int idx, u8 *outp)
 			ret = parse_dcb20_entry(dev, dcb, conn, conf, entry);
 		else
 			ret = parse_dcb15_entry(dev, dcb, conn, conf, entry);
+		entry->id = idx;
+
 		if (!ret)
 			return 1; /* stop parsing */
 
@@ -2042,7 +2049,6 @@ nouveau_run_vbios_init(struct drm_device *dev)
 {
 	struct nouveau_drm *drm = nouveau_drm(dev);
 	struct nvbios *bios = &drm->vbios;
-	int ret = 0;
 
 	/* Reset the BIOS head to 0. */
 	bios->state.crtchead = 0;
@@ -2055,7 +2061,7 @@ nouveau_run_vbios_init(struct drm_device *dev)
 		bios->fp.lvds_init_run = false;
 	}
 
-	return ret;
+	return 0;
 }
 
 static bool
@@ -2083,15 +2089,18 @@ nouveau_bios_init(struct drm_device *dev)
 	int ret;
 
 	/* only relevant for PCI devices */
-	if (!dev->pdev)
+	if (!dev_is_pci(dev->dev) ||
+	    nvkm_gsp_rm(nvxx_device(&drm->client.device)->gsp))
 		return 0;
 
 	if (!NVInitVBIOS(dev))
 		return -ENODEV;
 
-	ret = parse_dcb_table(dev, bios);
-	if (ret)
-		return ret;
+	if (drm->client.device.info.family < NV_DEVICE_INFO_V0_TESLA) {
+		ret = parse_dcb_table(dev, bios);
+		if (ret)
+			return ret;
+	}
 
 	if (!bios->major_version)	/* we don't run version 0 bios */
 		return 0;

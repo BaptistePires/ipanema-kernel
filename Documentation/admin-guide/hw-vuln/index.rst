@@ -13,4 +13,12 @@ are configurable at compile, boot or run time.
    l1tf
    mds
    tsx_async_abort
-   multihit.rst
+   multihit
+   special-register-buffer-data-sampling
+   core-scheduling
+   l1d_flush
+   processor_mmio_stale_data
+   cross-thread-rsb
+   srso
+   gather_data_sampling
+   reg-file-data-sampling

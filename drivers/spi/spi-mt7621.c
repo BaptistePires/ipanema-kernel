@@ -14,7 +14,9 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/platform_device.h>
 #include <linux/reset.h>
 #include <linux/spi/spi.h>
 
@@ -51,17 +53,16 @@
 #define MT7621_LSB_FIRST	BIT(3)
 
 struct mt7621_spi {
-	struct spi_controller	*master;
+	struct spi_controller	*host;
 	void __iomem		*base;
 	unsigned int		sys_freq;
 	unsigned int		speed;
-	struct clk		*clk;
 	int			pending_write;
 };
 
 static inline struct mt7621_spi *spidev_to_mt7621_spi(struct spi_device *spi)
 {
-	return spi_controller_get_devdata(spi->master);
+	return spi_controller_get_devdata(spi->controller);
 }
 
 static inline u32 mt7621_spi_read(struct mt7621_spi *rs, u32 reg)
@@ -77,19 +78,19 @@ static inline void mt7621_spi_write(struct mt7621_spi *rs, u32 reg, u32 val)
 static void mt7621_spi_set_cs(struct spi_device *spi, int enable)
 {
 	struct mt7621_spi *rs = spidev_to_mt7621_spi(spi);
-	int cs = spi->chip_select;
+	int cs = spi_get_chipselect(spi, 0);
 	u32 polar = 0;
-	u32 master;
+	u32 host;
 
 	/*
 	 * Select SPI device 7, enable "more buffer mode" and disable
 	 * full-duplex (only half-duplex really works on this chip
 	 * reliably)
 	 */
-	master = mt7621_spi_read(rs, MT7621_SPI_MASTER);
-	master |= MASTER_RS_SLAVE_SEL | MASTER_MORE_BUFMODE;
-	master &= ~MASTER_FULL_DUPLEX;
-	mt7621_spi_write(rs, MT7621_SPI_MASTER, master);
+	host = mt7621_spi_read(rs, MT7621_SPI_MASTER);
+	host |= MASTER_RS_SLAVE_SEL | MASTER_MORE_BUFMODE;
+	host &= ~MASTER_FULL_DUPLEX;
+	mt7621_spi_write(rs, MT7621_SPI_MASTER, host);
 
 	rs->pending_write = 0;
 
@@ -244,10 +245,10 @@ static void mt7621_spi_write_half_duplex(struct mt7621_spi *rs,
 	rs->pending_write = len;
 }
 
-static int mt7621_spi_transfer_one_message(struct spi_controller *master,
+static int mt7621_spi_transfer_one_message(struct spi_controller *host,
 					   struct spi_message *m)
 {
-	struct mt7621_spi *rs = spi_controller_get_devdata(master);
+	struct mt7621_spi *rs = spi_controller_get_devdata(host);
 	struct spi_device *spi = m->spi;
 	unsigned int speed = spi->max_speed_hz;
 	struct spi_transfer *t = NULL;
@@ -293,7 +294,7 @@ static int mt7621_spi_transfer_one_message(struct spi_controller *master,
 
 msg_done:
 	m->status = status;
-	spi_finalize_current_message(master);
+	spi_finalize_current_message(host);
 
 	return 0;
 }
@@ -324,10 +325,9 @@ MODULE_DEVICE_TABLE(of, mt7621_spi_match);
 static int mt7621_spi_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *match;
-	struct spi_controller *master;
+	struct spi_controller *host;
 	struct mt7621_spi *rs;
 	void __iomem *base;
-	int status = 0;
 	struct clk *clk;
 	int ret;
 
@@ -339,38 +339,31 @@ static int mt7621_spi_probe(struct platform_device *pdev)
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
-	clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(clk)) {
-		dev_err(&pdev->dev, "unable to get SYS clock, err=%d\n",
-			status);
-		return PTR_ERR(clk);
-	}
+	clk = devm_clk_get_enabled(&pdev->dev, NULL);
+	if (IS_ERR(clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(clk),
+				     "unable to get SYS clock\n");
 
-	status = clk_prepare_enable(clk);
-	if (status)
-		return status;
-
-	master = spi_alloc_master(&pdev->dev, sizeof(*rs));
-	if (!master) {
-		dev_info(&pdev->dev, "master allocation failed\n");
+	host = devm_spi_alloc_host(&pdev->dev, sizeof(*rs));
+	if (!host) {
+		dev_info(&pdev->dev, "host allocation failed\n");
 		return -ENOMEM;
 	}
 
-	master->mode_bits = SPI_LSB_FIRST;
-	master->flags = SPI_CONTROLLER_HALF_DUPLEX;
-	master->setup = mt7621_spi_setup;
-	master->transfer_one_message = mt7621_spi_transfer_one_message;
-	master->bits_per_word_mask = SPI_BPW_MASK(8);
-	master->dev.of_node = pdev->dev.of_node;
-	master->num_chipselect = 2;
+	host->mode_bits = SPI_LSB_FIRST;
+	host->flags = SPI_CONTROLLER_HALF_DUPLEX;
+	host->setup = mt7621_spi_setup;
+	host->transfer_one_message = mt7621_spi_transfer_one_message;
+	host->bits_per_word_mask = SPI_BPW_MASK(8);
+	host->dev.of_node = pdev->dev.of_node;
+	host->num_chipselect = 2;
 
-	dev_set_drvdata(&pdev->dev, master);
+	dev_set_drvdata(&pdev->dev, host);
 
-	rs = spi_controller_get_devdata(master);
+	rs = spi_controller_get_devdata(host);
 	rs->base = base;
-	rs->clk = clk;
-	rs->master = master;
-	rs->sys_freq = clk_get_rate(rs->clk);
+	rs->host = host;
+	rs->sys_freq = clk_get_rate(clk);
 	rs->pending_write = 0;
 	dev_info(&pdev->dev, "sys_freq: %u\n", rs->sys_freq);
 
@@ -380,20 +373,7 @@ static int mt7621_spi_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	return devm_spi_register_controller(&pdev->dev, master);
-}
-
-static int mt7621_spi_remove(struct platform_device *pdev)
-{
-	struct spi_controller *master;
-	struct mt7621_spi *rs;
-
-	master = dev_get_drvdata(&pdev->dev);
-	rs = spi_controller_get_devdata(master);
-
-	clk_disable_unprepare(rs->clk);
-
-	return 0;
+	return devm_spi_register_controller(&pdev->dev, host);
 }
 
 MODULE_ALIAS("platform:" DRIVER_NAME);
@@ -404,7 +384,6 @@ static struct platform_driver mt7621_spi_driver = {
 		.of_match_table = mt7621_spi_match,
 	},
 	.probe = mt7621_spi_probe,
-	.remove = mt7621_spi_remove,
 };
 
 module_platform_driver(mt7621_spi_driver);

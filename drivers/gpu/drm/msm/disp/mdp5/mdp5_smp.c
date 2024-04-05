@@ -68,7 +68,7 @@ static int smp_request_block(struct mdp5_smp *smp,
 	uint8_t reserved;
 
 	/* we shouldn't be requesting blocks for an in-use client: */
-	WARN_ON(bitmap_weight(cs, cnt) > 0);
+	WARN_ON(!bitmap_empty(cs, cnt));
 
 	reserved = smp->reserved[cid];
 
@@ -121,7 +121,6 @@ uint32_t mdp5_smp_calculate(struct mdp5_smp *smp,
 	struct mdp5_kms *mdp5_kms = get_kms(smp);
 	int rev = mdp5_cfg_get_hw_rev(mdp5_kms->cfg);
 	int i, hsub, nplanes, nlines;
-	u32 fmt = format->base.pixel_format;
 	uint32_t blkcfg = 0;
 
 	nplanes = info->num_planes;
@@ -135,7 +134,6 @@ uint32_t mdp5_smp_calculate(struct mdp5_smp *smp,
 	 * them together, writes to SMP using a single client.
 	 */
 	if ((rev > 0) && (format->chroma_sample > CHROMA_FULL)) {
-		fmt = DRM_FORMAT_NV24;
 		nplanes = 2;
 
 		/* if decimation is enabled, HW decimates less on the
@@ -372,23 +370,17 @@ void mdp5_smp_dump(struct mdp5_smp *smp, struct drm_printer *p)
 		drm_modeset_unlock(&mdp5_kms->glob_state_lock);
 }
 
-void mdp5_smp_destroy(struct mdp5_smp *smp)
-{
-	kfree(smp);
-}
 
 struct mdp5_smp *mdp5_smp_init(struct mdp5_kms *mdp5_kms, const struct mdp5_smp_block *cfg)
 {
+	struct drm_device *dev = mdp5_kms->dev;
 	struct mdp5_smp_state *state;
 	struct mdp5_global_state *global_state;
-	struct mdp5_smp *smp = NULL;
-	int ret;
+	struct mdp5_smp *smp;
 
-	smp = kzalloc(sizeof(*smp), GFP_KERNEL);
-	if (unlikely(!smp)) {
-		ret = -ENOMEM;
-		goto fail;
-	}
+	smp = devm_kzalloc(dev->dev, sizeof(*smp), GFP_KERNEL);
+	if (unlikely(!smp))
+		return ERR_PTR(-ENOMEM);
 
 	smp->dev = mdp5_kms->dev;
 	smp->blk_cnt = cfg->mmb_count;
@@ -402,9 +394,4 @@ struct mdp5_smp *mdp5_smp_init(struct mdp5_kms *mdp5_kms, const struct mdp5_smp_
 	memcpy(smp->reserved, cfg->reserved, sizeof(smp->reserved));
 
 	return smp;
-fail:
-	if (smp)
-		mdp5_smp_destroy(smp);
-
-	return ERR_PTR(ret);
 }

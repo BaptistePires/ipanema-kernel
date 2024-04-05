@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0+
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2017 Oracle.  All Rights Reserved.
- * Author: Darrick J. Wong <darrick.wong@oracle.com>
+ * Copyright (C) 2017-2023 Oracle.  All Rights Reserved.
+ * Author: Darrick J. Wong <djwong@kernel.org>
  */
 #ifndef __XFS_SCRUB_DABTREE_H__
 #define __XFS_SCRUB_DABTREE_H__
@@ -28,8 +28,7 @@ struct xchk_da_btree {
 	int			tree_level;
 };
 
-typedef int (*xchk_da_btree_rec_fn)(struct xchk_da_btree *ds,
-		int level, void *rec);
+typedef int (*xchk_da_btree_rec_fn)(struct xchk_da_btree *ds, int level);
 
 /* Check for da btree operation errors. */
 bool xchk_da_process_error(struct xchk_da_btree *ds, int level, int *error);

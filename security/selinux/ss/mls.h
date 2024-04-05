@@ -2,7 +2,7 @@
 /*
  * Multi-level security (MLS) policy operations.
  *
- * Author : Stephen Smalley, <sds@tycho.nsa.gov>
+ * Author : Stephen Smalley, <stephen.smalley.work@gmail.com>
  */
 /*
  * Updated: Trusted Computer Solutions, Inc. <dgoeddel@trustedcs.com>
@@ -22,7 +22,10 @@
 #ifndef _SS_MLS_H_
 #define _SS_MLS_H_
 
+#include <linux/jhash.h>
+
 #include "context.h"
+#include "ebitmap.h"
 #include "policydb.h"
 
 int mls_compute_context_len(struct policydb *p, struct context *context);
@@ -100,6 +103,14 @@ static inline int mls_import_netlbl_cat(struct policydb *p,
 	return -ENOMEM;
 }
 #endif
+
+static inline u32 mls_range_hash(const struct mls_range *r, u32 hash)
+{
+	hash = jhash_2words(r->level[0].sens, r->level[1].sens, hash);
+	hash = ebitmap_hash(&r->level[0].cat, hash);
+	hash = ebitmap_hash(&r->level[1].cat, hash);
+	return hash;
+}
 
 #endif	/* _SS_MLS_H */
 

@@ -11,10 +11,10 @@
 #include "clk.h"
 
 /**
- * struct exynos_cpuclk_data: config data to setup cpu clocks.
- * @prate: frequency of the primary parent clock (in KHz).
- * @div0: value to be programmed in the div_cpu0 register.
- * @div1: value to be programmed in the div_cpu1 register.
+ * struct exynos_cpuclk_cfg_data - config data to setup cpu clocks
+ * @prate: frequency of the primary parent clock (in KHz)
+ * @div0: value to be programmed in the div_cpu0 register
+ * @div1: value to be programmed in the div_cpu1 register
  *
  * This structure holds the divider configuration data for dividers in the CPU
  * clock domain. The parent frequency at which these divider values are valid is
@@ -29,24 +29,24 @@ struct exynos_cpuclk_cfg_data {
 };
 
 /**
- * struct exynos_cpuclk: information about clock supplied to a CPU core.
- * @hw:	handle between CCF and CPU clock.
- * @alt_parent: alternate parent clock to use when switching the speed
- *	of the primary parent clock.
- * @ctrl_base:	base address of the clock controller.
- * @lock: cpu clock domain register access lock.
- * @cfg: cpu clock rate configuration data.
- * @num_cfgs: number of array elements in @cfg array.
- * @clk_nb: clock notifier registered for changes in clock speed of the
- *	primary parent clock.
- * @flags: configuration flags for the CPU clock.
+ * struct exynos_cpuclk - information about clock supplied to a CPU core
+ * @hw:		handle between CCF and CPU clock
+ * @alt_parent:	alternate parent clock to use when switching the speed
+ *		of the primary parent clock
+ * @ctrl_base:	base address of the clock controller
+ * @lock:	cpu clock domain register access lock
+ * @cfg:	cpu clock rate configuration data
+ * @num_cfgs:	number of array elements in @cfg array
+ * @clk_nb:	clock notifier registered for changes in clock speed of the
+ *		primary parent clock
+ * @flags:	configuration flags for the CPU clock
  *
  * This structure holds information required for programming the CPU clock for
  * various clock speeds.
  */
 struct exynos_cpuclk {
 	struct clk_hw				hw;
-	struct clk_hw				*alt_parent;
+	const struct clk_hw			*alt_parent;
 	void __iomem				*ctrl_base;
 	spinlock_t				*lock;
 	const struct exynos_cpuclk_cfg_data	*cfg;
@@ -61,12 +61,5 @@ struct exynos_cpuclk {
 /* The CPU clock registers have Exynos5433-compatible layout */
 #define CLK_CPU_HAS_E5433_REGS_LAYOUT	(1 << 2)
 };
-
-extern int __init exynos_register_cpu_clock(struct samsung_clk_provider *ctx,
-			unsigned int lookup_id, const char *name,
-			const char *parent, const char *alt_parent,
-			unsigned long offset,
-			const struct exynos_cpuclk_cfg_data *cfg,
-			unsigned long num_cfgs, unsigned long flags);
 
 #endif /* __SAMSUNG_CLK_CPU_H */

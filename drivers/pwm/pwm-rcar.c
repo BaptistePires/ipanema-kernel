@@ -3,6 +3,9 @@
  * R-Car PWM Timer driver
  *
  * Copyright (C) 2015 Renesas Electronics Corporation
+ *
+ * Limitations:
+ * - The hardware cannot generate a 0% duty cycle.
  */
 
 #include <linux/clk.h>
@@ -107,7 +110,7 @@ static int rcar_pwm_set_counter(struct rcar_pwm_chip *rp, int div, int duty_ns,
 	unsigned long clk_rate = clk_get_rate(rp->clk);
 	u32 cyc, ph;
 
-	one_cycle = (unsigned long long)NSEC_PER_SEC * 100ULL * (1 << div);
+	one_cycle = NSEC_PER_SEC * 100ULL << div;
 	do_div(one_cycle, clk_rate);
 
 	tmp = period_ns * 100ULL;
@@ -161,13 +164,11 @@ static int rcar_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 			  const struct pwm_state *state)
 {
 	struct rcar_pwm_chip *rp = to_rcar_pwm_chip(chip);
-	struct pwm_state cur_state;
 	int div, ret;
 
 	/* This HW/driver only supports normal polarity */
-	pwm_get_state(pwm, &cur_state);
 	if (state->polarity != PWM_POLARITY_NORMAL)
-		return -ENOTSUPP;
+		return -EINVAL;
 
 	if (!state->enabled) {
 		rcar_pwm_disable(rp);
@@ -197,21 +198,18 @@ static const struct pwm_ops rcar_pwm_ops = {
 	.request = rcar_pwm_request,
 	.free = rcar_pwm_free,
 	.apply = rcar_pwm_apply,
-	.owner = THIS_MODULE,
 };
 
 static int rcar_pwm_probe(struct platform_device *pdev)
 {
 	struct rcar_pwm_chip *rcar_pwm;
-	struct resource *res;
 	int ret;
 
 	rcar_pwm = devm_kzalloc(&pdev->dev, sizeof(*rcar_pwm), GFP_KERNEL);
 	if (rcar_pwm == NULL)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	rcar_pwm->base = devm_ioremap_resource(&pdev->dev, res);
+	rcar_pwm->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(rcar_pwm->base))
 		return PTR_ERR(rcar_pwm->base);
 
@@ -225,27 +223,27 @@ static int rcar_pwm_probe(struct platform_device *pdev)
 
 	rcar_pwm->chip.dev = &pdev->dev;
 	rcar_pwm->chip.ops = &rcar_pwm_ops;
-	rcar_pwm->chip.base = -1;
 	rcar_pwm->chip.npwm = 1;
+
+	pm_runtime_enable(&pdev->dev);
 
 	ret = pwmchip_add(&rcar_pwm->chip);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register PWM chip: %d\n", ret);
+		pm_runtime_disable(&pdev->dev);
 		return ret;
 	}
-
-	pm_runtime_enable(&pdev->dev);
 
 	return 0;
 }
 
-static int rcar_pwm_remove(struct platform_device *pdev)
+static void rcar_pwm_remove(struct platform_device *pdev)
 {
 	struct rcar_pwm_chip *rcar_pwm = platform_get_drvdata(pdev);
 
-	pm_runtime_disable(&pdev->dev);
+	pwmchip_remove(&rcar_pwm->chip);
 
-	return pwmchip_remove(&rcar_pwm->chip);
+	pm_runtime_disable(&pdev->dev);
 }
 
 static const struct of_device_id rcar_pwm_of_table[] = {
@@ -256,10 +254,10 @@ MODULE_DEVICE_TABLE(of, rcar_pwm_of_table);
 
 static struct platform_driver rcar_pwm_driver = {
 	.probe = rcar_pwm_probe,
-	.remove = rcar_pwm_remove,
+	.remove_new = rcar_pwm_remove,
 	.driver = {
 		.name = "pwm-rcar",
-		.of_match_table = of_match_ptr(rcar_pwm_of_table),
+		.of_match_table = rcar_pwm_of_table,
 	}
 };
 module_platform_driver(rcar_pwm_driver);

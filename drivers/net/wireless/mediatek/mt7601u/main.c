@@ -132,7 +132,7 @@ mt76_configure_filter(struct ieee80211_hw *hw, unsigned int changed_flags,
 
 static void
 mt7601u_bss_info_changed(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-			 struct ieee80211_bss_conf *info, u32 changed)
+			 struct ieee80211_bss_conf *info, u64 changed)
 {
 	struct mt7601u_dev *dev = hw->priv;
 
@@ -372,8 +372,7 @@ mt76_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		break;
 	case IEEE80211_AMPDU_TX_START:
 		msta->agg_ssn[tid] = ssn << 4;
-		ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
-		break;
+		return IEEE80211_AMPDU_TX_START_IMMEDIATE;
 	case IEEE80211_AMPDU_TX_STOP_CONT:
 		ieee80211_stop_tx_ba_cb_irqsafe(vif, sta->addr, tid);
 		break;
@@ -407,6 +406,7 @@ out:
 
 const struct ieee80211_ops mt7601u_ops = {
 	.tx = mt7601u_tx,
+	.wake_tx_queue = ieee80211_handle_wake_tx_queue,
 	.start = mt7601u_start,
 	.stop = mt7601u_stop,
 	.add_interface = mt7601u_add_interface,

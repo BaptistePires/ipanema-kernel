@@ -236,7 +236,7 @@ including a full 'lspci -v' so we can add the quirks to the kernel.
 Disabling MSIs below a bridge
 -----------------------------
 
-Some PCI bridges are not able to route MSIs between busses properly.
+Some PCI bridges are not able to route MSIs between buses properly.
 In this case, MSIs must be disabled on all devices behind the bridge.
 
 Some bridges allow you to enable MSIs by changing some bits in their
@@ -283,5 +283,15 @@ or disabled (0).  If 0 is found in any of the msi_bus files belonging
 to bridges between the PCI root and the device, MSIs are disabled.
 
 It is also worth checking the device driver to see whether it supports MSIs.
-For example, it may contain calls to pci_irq_alloc_vectors() with the
+For example, it may contain calls to pci_alloc_irq_vectors() with the
 PCI_IRQ_MSI or PCI_IRQ_MSIX flags.
+
+
+List of device drivers MSI(-X) APIs
+===================================
+
+The PCI/MSI subsystem has a dedicated C file for its exported device driver
+APIs — `drivers/pci/msi/api.c`. The following functions are exported:
+
+.. kernel-doc:: drivers/pci/msi/api.c
+   :export:

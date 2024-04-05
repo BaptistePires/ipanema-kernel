@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/**
+/*
  * dir.c - NTFS kernel directory operations. Part of the Linux-NTFS project.
  *
  * Copyright (c) 2001-2007 Anton Altaparmakov
@@ -8,6 +8,7 @@
 
 #include <linux/buffer_head.h>
 #include <linux/slab.h>
+#include <linux/blkdev.h>
 
 #include "dir.h"
 #include "aops.h"
@@ -16,7 +17,7 @@
 #include "debug.h"
 #include "ntfs.h"
 
-/**
+/*
  * The little endian Unicode string $I30 as a global constant.
  */
 ntfschar I30[5] = { cpu_to_le16('$'), cpu_to_le16('I'),
@@ -1461,7 +1462,8 @@ static int ntfs_dir_open(struct inode *vi, struct file *filp)
 /**
  * ntfs_dir_fsync - sync a directory to disk
  * @filp:	directory to be synced
- * @dentry:	dentry describing the directory to sync
+ * @start:	offset in bytes of the beginning of data range to sync
+ * @end:	offset in bytes of the end of data range (inclusive)
  * @datasync:	if non-zero only flush user data and not metadata
  *
  * Data integrity sync of a directory to disk.  Used for fsync, fdatasync, and
@@ -1503,7 +1505,7 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 	na.type = AT_BITMAP;
 	na.name = I30;
 	na.name_len = 4;
-	bmp_vi = ilookup5(vi->i_sb, vi->i_ino, (test_t)ntfs_test_inode, &na);
+	bmp_vi = ilookup5(vi->i_sb, vi->i_ino, ntfs_test_inode, &na);
 	if (bmp_vi) {
  		write_inode_now(bmp_vi, !datasync);
 		iput(bmp_vi);
@@ -1524,10 +1526,11 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 
 #endif /* NTFS_RW */
 
+WRAP_DIR_ITER(ntfs_readdir) // FIXME!
 const struct file_operations ntfs_dir_ops = {
 	.llseek		= generic_file_llseek,	/* Seek inside directory. */
 	.read		= generic_read_dir,	/* Return -EISDIR. */
-	.iterate	= ntfs_readdir,		/* Read directory contents. */
+	.iterate_shared	= shared_ntfs_readdir,	/* Read directory contents. */
 #ifdef NTFS_RW
 	.fsync		= ntfs_dir_fsync,	/* Sync a directory to disk. */
 #endif /* NTFS_RW */

@@ -221,10 +221,8 @@ static int goldfish_battery_probe(struct platform_device *pdev)
 	}
 
 	data->irq = platform_get_irq(pdev, 0);
-	if (data->irq < 0) {
-		dev_err(&pdev->dev, "platform_get_irq failed\n");
+	if (data->irq < 0)
 		return -ENODEV;
-	}
 
 	ret = devm_request_irq(&pdev->dev, data->irq,
 			       goldfish_battery_interrupt,
@@ -251,13 +249,12 @@ static int goldfish_battery_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int goldfish_battery_remove(struct platform_device *pdev)
+static void goldfish_battery_remove(struct platform_device *pdev)
 {
 	struct goldfish_battery_data *data = platform_get_drvdata(pdev);
 
 	power_supply_unregister(data->battery);
 	power_supply_unregister(data->ac);
-	return 0;
 }
 
 static const struct of_device_id goldfish_battery_of_match[] = {
@@ -266,15 +263,17 @@ static const struct of_device_id goldfish_battery_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, goldfish_battery_of_match);
 
+#ifdef CONFIG_ACPI
 static const struct acpi_device_id goldfish_battery_acpi_match[] = {
 	{ "GFSH0001", 0 },
 	{ },
 };
 MODULE_DEVICE_TABLE(acpi, goldfish_battery_acpi_match);
+#endif
 
 static struct platform_driver goldfish_battery_device = {
 	.probe		= goldfish_battery_probe,
-	.remove		= goldfish_battery_remove,
+	.remove_new	= goldfish_battery_remove,
 	.driver = {
 		.name = "goldfish-battery",
 		.of_match_table = goldfish_battery_of_match,

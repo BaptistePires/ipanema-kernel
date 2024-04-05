@@ -1,5 +1,7 @@
-The Undefined Behavior Sanitizer - UBSAN
-========================================
+.. SPDX-License-Identifier: GPL-2.0
+
+Undefined Behavior Sanitizer - UBSAN
+====================================
 
 UBSAN is a runtime undefined behaviour checker.
 
@@ -86,3 +88,4 @@ References
 
 .. _1: https://gcc.gnu.org/onlinedocs/gcc-4.9.0/gcc/Debugging-Options.html
 .. _2: https://gcc.gnu.org/onlinedocs/gcc/Debugging-Options.html
+.. _3: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html

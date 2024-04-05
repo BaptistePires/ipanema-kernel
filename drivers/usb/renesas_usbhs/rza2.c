@@ -8,7 +8,6 @@
 
 #include <linux/delay.h>
 #include <linux/io.h>
-#include <linux/of_device.h>
 #include <linux/phy/phy.h>
 #include "common.h"
 #include "rza.h"
@@ -29,7 +28,7 @@ static int usbhs_rza2_hardware_exit(struct platform_device *pdev)
 {
 	struct usbhs_priv *priv = usbhs_pdev_to_priv(pdev);
 
-	phy_put(priv->phy);
+	phy_put(&pdev->dev, priv->phy);
 	priv->phy = NULL;
 
 	return 0;

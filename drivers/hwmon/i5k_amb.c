@@ -396,7 +396,7 @@ exit_remove:
 
 static int i5k_amb_add(void)
 {
-	int res = -ENODEV;
+	int res;
 
 	/* only ever going to be one of these */
 	amb_pdev = platform_device_alloc(DRVNAME, 0);
@@ -427,11 +427,13 @@ static int i5k_find_amb_registers(struct i5k_amb_data *data,
 	if (!pcidev)
 		return -ENODEV;
 
-	if (pci_read_config_dword(pcidev, I5K_REG_AMB_BASE_ADDR, &val32))
+	pci_read_config_dword(pcidev, I5K_REG_AMB_BASE_ADDR, &val32);
+	if (val32 == (u32)~0)
 		goto out;
 	data->amb_base = val32;
 
-	if (pci_read_config_dword(pcidev, I5K_REG_AMB_LEN_ADDR, &val32))
+	pci_read_config_dword(pcidev, I5K_REG_AMB_LEN_ADDR, &val32);
+	if (val32 == (u32)~0)
 		goto out;
 	data->amb_len = val32;
 
@@ -458,11 +460,13 @@ static int i5k_channel_probe(u16 *amb_present, unsigned long dev_id)
 	if (!pcidev)
 		return -ENODEV;
 
-	if (pci_read_config_word(pcidev, I5K_REG_CHAN0_PRESENCE_ADDR, &val16))
+	pci_read_config_word(pcidev, I5K_REG_CHAN0_PRESENCE_ADDR, &val16);
+	if (val16 == (u16)~0)
 		goto out;
 	amb_present[0] = val16;
 
-	if (pci_read_config_word(pcidev, I5K_REG_CHAN1_PRESENCE_ADDR, &val16))
+	pci_read_config_word(pcidev, I5K_REG_CHAN1_PRESENCE_ADDR, &val16);
+	if (val16 == (u16)~0)
 		goto out;
 	amb_present[1] = val16;
 
@@ -528,7 +532,7 @@ static int i5k_amb_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	data->amb_mmio = ioremap_nocache(data->amb_base, data->amb_len);
+	data->amb_mmio = ioremap(data->amb_base, data->amb_len);
 	if (!data->amb_mmio) {
 		res = -EBUSY;
 		goto err_map_failed;
@@ -551,7 +555,7 @@ err:
 	return res;
 }
 
-static int i5k_amb_remove(struct platform_device *pdev)
+static void i5k_amb_remove(struct platform_device *pdev)
 {
 	int i;
 	struct i5k_amb_data *data = platform_get_drvdata(pdev);
@@ -564,7 +568,6 @@ static int i5k_amb_remove(struct platform_device *pdev)
 	iounmap(data->amb_mmio);
 	release_mem_region(data->amb_base, data->amb_len);
 	kfree(data);
-	return 0;
 }
 
 static struct platform_driver i5k_amb_driver = {
@@ -572,7 +575,7 @@ static struct platform_driver i5k_amb_driver = {
 		.name = DRVNAME,
 	},
 	.probe = i5k_amb_probe,
-	.remove = i5k_amb_remove,
+	.remove_new = i5k_amb_remove,
 };
 
 static int __init i5k_amb_init(void)
