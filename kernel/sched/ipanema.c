@@ -205,9 +205,6 @@ static void ipanema_new_place(struct process_event *e)
 	policy->routines->new_place(policy, e);
 }
 
-/*
-	Compiling error as it is currently unused.
-*/
 // static void ipanema_new_end(struct process_event *e)
 // {
 // 	struct task_struct *p = e->target;
@@ -311,9 +308,7 @@ static void ipanema_unblock_place(struct process_event *e)
 	policy->routines->unblock_place(policy, e);
 }
 
-/*
-	Compiling error as it is currently unused.
-*/
+
 // static void ipanema_unblock_end(struct process_event *e)
 // {
 // 	struct task_struct *p = e->target;
@@ -996,7 +991,7 @@ static void check_preempt_wakeup(struct rq *rq,
 }
 
 
-static struct task_struct *pick_next_task_ipanema(struct rq *rq,
+static struct task_struct *__pick_next_task_ipanema(struct rq *rq,
 						  struct task_struct *prev,
 						  struct rq_flags *rf)
 {
@@ -1036,6 +1031,7 @@ static struct task_struct *pick_next_task_ipanema(struct rq *rq,
 	}
 	read_lock_irqsave(&ipanema_rwlock, flags);
 	list_for_each_entry(policy, &ipanema_policies, list) {
+		pr_info("ayo\n");
 		ipanema_schedule(policy, rq->cpu);
 		result = per_cpu(ipanema_current, rq->cpu);
 		/* if a task is found, schedule it */
@@ -1084,9 +1080,9 @@ end:
 	return result;
 }
 
-static struct task_struct *__pick_next_task_ipanema(struct rq *rq)
+struct task_struct *pick_next_task_ipanema(struct rq *rq)
 {
-	return pick_next_task_ipanema(rq, NULL, NULL);
+	return __pick_next_task_ipanema(rq, NULL, NULL);
 }
 
 static void put_prev_task_ipanema(struct rq *rq,
@@ -1414,7 +1410,7 @@ static void run_rebalance_domains(struct softirq_action *h)
 	ipanema_balancing_select();
 }
 
-const struct sched_class ipanema_sched_class = {
+DEFINE_SCHED_CLASS(ipanema) = {
 	.enqueue_task		= enqueue_task_ipanema,
 	.dequeue_task		= dequeue_task_ipanema,
 	.yield_task		= yield_task_ipanema,
@@ -1422,7 +1418,7 @@ const struct sched_class ipanema_sched_class = {
 
 	.wakeup_preempt	= check_preempt_wakeup,
 
-	.pick_next_task		= __pick_next_task_ipanema,
+	.pick_next_task		= pick_next_task_ipanema,
 	.put_prev_task		= put_prev_task_ipanema,
 
 #ifdef CONFIG_SMP

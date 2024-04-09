@@ -33,3 +33,7 @@ obj-y += fair.o
 obj-y += ipanema.o
 obj-y += build_policy.o
 obj-y += build_utility.o
+
+obj-$(CONFIG_IPANEMA_POLICY_CFS) += ipanema/
+obj-$(CONFIG_IPANEMA_POLICY_CFS_WWC) += ipanema/
+obj-$(CONFIG_IPANEMA_POLICY_CFS_WWC_LOCAL_NEW_UNBLOCK) += ipanema/

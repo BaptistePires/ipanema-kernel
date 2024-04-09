@@ -122,7 +122,7 @@ static inline void update_load(struct cfs_ipa_process *p)
 		p->load = 1;
 }
 
-int ipanema_cfs_order_process(struct task_struct *a,
+static int ipanema_cfs_order_process(struct task_struct *a,
 			      struct task_struct *b)
 {
 	struct cfs_ipa_process *pa = policy_metadata(a);
@@ -382,7 +382,8 @@ static void steal_for_dom(struct ipanema_policy *policy,
 			  struct cfs_ipa_sched_domain *sd)
 {
 	struct lb_env env;
-	DECLARE_BITMAP(stealable_groups, sd->___sched_group_idx);
+	/* Temp fix. we can't alocate a bitmap without a fixed size now. */
+	DECLARE_BITMAP(stealable_groups, NR_CPUS);
 	cpumask_t stealable_cores;
 	struct cfs_ipa_core *selected = NULL, *c = NULL;
 	struct cfs_ipa_sched_group
@@ -572,7 +573,7 @@ static void ipanema_cfs_new_place(struct ipanema_policy *policy,
 static void ipanema_cfs_new_end(struct ipanema_policy *policy,
 				struct process_event *e)
 {
-	pr_info("[%d] post new on core %d\n", e->target->pid, e->target->cpu);
+	pr_info("[%d] post new on core %d\n", e->target->pid, task_cpu(e->target));
 }
 
 static void ipanema_cfs_detach(struct ipanema_policy *policy,
@@ -729,7 +730,7 @@ static void ipanema_cfs_unblock_end(struct ipanema_policy *policy,
 				    struct process_event *e)
 {
 	pr_info("[%d] post unblock on core %d\n", e->target->pid,
-		       e->target->cpu);
+		       task_cpu(e->target));
 }
 
 static void ipanema_cfs_schedule(struct ipanema_policy *policy,
@@ -823,13 +824,13 @@ static bool ipanema_cfs_attach(struct ipanema_policy *policy,
 	return true;
 }
 
-int ipanema_cfs_free_metadata(struct ipanema_policy *policy)
+static int ipanema_cfs_free_metadata(struct ipanema_policy *policy)
 {
 	kfree(policy->data);
 	return 0;
 }
 
-int ipanema_cfs_can_be_default(struct ipanema_policy *policy)
+static int ipanema_cfs_can_be_default(struct ipanema_policy *policy)
 {
 	return 1;
 }
@@ -1138,12 +1139,11 @@ static int proc_topo_open(struct inode *inode, struct file *file)
 	return single_open(file, proc_topo_show, NULL);
 }
 
-static const struct file_operations proc_topo_fops = {
-	.owner   = THIS_MODULE,
-	.open    = proc_topo_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = single_release,
+static const struct proc_ops proc_topo_fops = {
+	.proc_open    = proc_topo_open,
+	.proc_read    = seq_read,
+	.proc_lseek  = seq_lseek,
+	.proc_release = single_release,
 };
 
 static int __init my_init_module(void)
@@ -1203,6 +1203,7 @@ static int __init my_init_module(void)
 	return 0;
 
 clean_policy:
+	pr_info("here ???\n");
 	kfree(policy);
 end:
 	return res;

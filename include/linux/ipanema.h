@@ -159,6 +159,7 @@ extern void ipanema_unlock_core(unsigned int id);
 
 extern int ipanema_just_queued(struct task_struct *p);
 
+struct task_struct *pick_next_task_ipanema(struct rq *rq);
 #endif /* __KERNEL__ */
 
 #endif /* __IPANEMA_H */
