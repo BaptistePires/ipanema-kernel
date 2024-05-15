@@ -944,7 +944,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 		goto end;
 
 	pr_warn("[WARN] Uncaught dequeue, CONTEXT: p=[pid=%d, cpu=%d, state=%u, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
-		p->pid, task_cpu(p), p->__state, p->on_cpu, p->on_rq,
+		p->pid, task_cpu(p), READ_ONCE(p->__state), p->on_cpu, p->on_rq,
 		ipanema_state_to_str(ipanema_task_state(p)),
 		rq->cpu, rq, flags);
 
@@ -1031,7 +1031,6 @@ static struct task_struct *__pick_next_task_ipanema(struct rq *rq,
 	}
 	read_lock_irqsave(&ipanema_rwlock, flags);
 	list_for_each_entry(policy, &ipanema_policies, list) {
-		pr_info("ayo\n");
 		ipanema_schedule(policy, rq->cpu);
 		result = per_cpu(ipanema_current, rq->cpu);
 		/* if a task is found, schedule it */
