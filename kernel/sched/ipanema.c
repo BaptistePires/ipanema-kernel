@@ -849,6 +849,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 {
 	struct process_event e = { .target = p, .cpu = smp_processor_id() };
 	int state;
+
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d, rq=%d]\n",
 			__func__, p->pid, rq->cpu);
@@ -906,6 +907,16 @@ static void dequeue_task_ipanema(struct rq *rq,
 	 * We add TASK_KILLABLE to make sure that all received signals are
 	 * handled correctly.
 	 *
+	 * We add TASK_WAKING because a task p that is in a blocking path (i.e enters
+	 * __schedule() with TASK_INTERRUPTIBLE) can see its p->__state altered by another
+	 * one p' in try_to_wake_up(). When p reaches dequeue_task() in __schedule(),
+	 * p' is executing try_to_wake_up to wake it up (because the data p was waiting
+	 * for is ready or for reasons not identified yet :)) and executes
+	 * p->__state = TASK_WAKING, then blocks until 'p->on_cpu == 0'. So we must take
+	 * this case into account and call the p->ipanema.policy->block().
+	 * For more details see the comments in __schedule() and try_to_wake_up()
+	 * to understand how it can happens.
+	 *
 	 * We also check for the OUSTED flag and TASK_ON_RQ_MIGRATING to
 	 * simulate a block/unblock pair when a thread is kicked out from its
 	 * cpu. It will be placed on a cpu handled by the policy and authorized
@@ -916,6 +927,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 	    state & TASK_UNINTERRUPTIBLE ||
 	    state & TASK_STOPPED ||
 	    state & TASK_KILLABLE ||
+	    state & TASK_WAKING ||
 	    (flags & OUSTED && task_on_rq_migrating(p))) {
 		ipanema_block(&e);
 		goto end;
