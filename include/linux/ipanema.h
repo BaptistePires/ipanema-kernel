@@ -20,14 +20,27 @@ struct ipanema_rq {
 		struct rb_root root;
 		struct list_head head;
 	};
+
+	/*
+	 * cpu to which this runqueue belongs (for per_cpu runqueues).
+	 * For runqueues that are not per_cpu, rq->cpu > NR_CPUS.
+	*/
 	unsigned int cpu;
 	enum ipanema_state state;
+
+	/* Number of tasks in this runqueue*/
 	unsigned int nr_tasks;
+
+	/* Is this runqueue per_cpu ? */
+	unsigned int is_per_cpu;
+	/* Not used yet. */
+	raw_spinlock_t lock;
 	int (*order_fn)(struct task_struct *a, struct task_struct *b);
 };
 
 void init_ipanema_rq(struct ipanema_rq *rq, enum ipanema_rq_type type,
 		     unsigned int cpu, enum ipanema_state state,
+		     unsigned int is_per_cpu,
 		     int (*order_fn)(struct task_struct *a,
 				     struct task_struct *b));
 

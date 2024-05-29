@@ -26,6 +26,9 @@ rwlock_t ipanema_rwlock;
 /* Current running task per type */
 DEFINE_PER_CPU(struct task_struct *, ipanema_current);
 
+/* Current nr IPANEMA_READY/IPANEMA_RUNNING tasks accross all ipanema policies */
+atomic64_t __nr_ipanema_running = ATOMIC_INIT(0);
+
 struct task_struct *get_ipanema_current(int cpu)
 {
 	return per_cpu(ipanema_current, cpu);
@@ -1850,6 +1853,7 @@ EXPORT_SYMBOL(ipanema_first_task);
 
 void init_ipanema_rq(struct ipanema_rq *rq, enum ipanema_rq_type type,
 		     unsigned int cpu, enum ipanema_state state,
+		     unsigned int is_per_cpu,
 		     int (*order_fn)(struct task_struct *a,
 				     struct task_struct *b))
 {
@@ -1866,6 +1870,7 @@ void init_ipanema_rq(struct ipanema_rq *rq, enum ipanema_rq_type type,
 	rq->cpu = cpu;
 	rq->state = state;
 	rq->nr_tasks = 0;
+	rq->is_per_cpu = is_per_cpu;
 	rq->order_fn = order_fn;
 }
 EXPORT_SYMBOL(init_ipanema_rq);
