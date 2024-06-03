@@ -16,6 +16,8 @@
 #include <linux/kref.h>
 #include <trace/events/sched.h>
 #include <linux/sched/cputime.h>
+#include <linux/atomic.h>
+
 
 LIST_HEAD(ipanema_policies);
 s64 num_ipanema_policies;
@@ -28,6 +30,7 @@ DEFINE_PER_CPU(struct task_struct *, ipanema_current);
 
 /* Current nr IPANEMA_READY/IPANEMA_RUNNING tasks accross all ipanema policies */
 atomic64_t __nr_ipanema_running = ATOMIC_INIT(0);
+EXPORT_SYMBOL(__nr_ipanema_running);
 
 struct task_struct *get_ipanema_current(int cpu)
 {
@@ -603,7 +606,7 @@ void change_state(struct task_struct *p, enum ipanema_state next_state,
 	    next_state == IPANEMA_TERMINATED)
 		next_rq = NULL;
 	if (next_rq) {
-		if (next_cpu != next_rq->cpu ||
+		if (((next_cpu != next_rq->cpu) && next_rq->is_per_cpu) ||
 		    (next_state != next_rq->state &&
 		     next_state != IPANEMA_READY_TICK &&
 		     next_rq->state != IPANEMA_READY)) {
@@ -643,13 +646,21 @@ void change_state(struct task_struct *p, enum ipanema_state next_state,
 	/* Now, let's do transition specific handling */
 
 	/* RUNNING -> x */
-	if (prev_state == IPANEMA_RUNNING)
+	if (prev_state == IPANEMA_RUNNING) {
+		/* TODO : update iif !per_cpu ?*/
 		per_cpu(ipanema_current, prev_cpu) = NULL;
+	}
 
 	/* x -> RUNNING */
 	if (next_state == IPANEMA_RUNNING) {
 		if (per_cpu(ipanema_current, next_cpu))
 			pr_warn("[WARN] putting a task in RUNNING but there is already another task! We preempt it to avoid potential bugs. Should not happen !!!\n");
+
+		if (prev_rq->is_per_cpu) {
+			set_task_cpu(p, task_cpu(p));
+			add_nr_running(task_rq(p), 1);
+			task_rq(p)->nr_ipanema_running++;
+		}
 
 		per_cpu(ipanema_current, next_cpu) = p;
 	}
@@ -679,8 +690,8 @@ void change_state(struct task_struct *p, enum ipanema_state next_state,
 	    prev_cpu == next_cpu)
 		resched_curr(cpu_rq(prev_cpu));
 
-	if (task_cpu(p) != next_cpu ||
-	    (next_rq && task_cpu(p) != next_rq->cpu)) {
+	if (((task_cpu(p) != next_cpu) & next_rq->is_per_cpu) ||
+	    (next_rq && ((task_cpu(p) != next_rq->cpu) && next_rq->is_per_cpu))) {
 		pr_warn("[WARN] Discrepency with task %d (task_cpu()=%d, next_cpu=%d, next_rq->cpu=%d)\n",
 			p->pid, task_cpu(p), next_cpu,
 			next_rq ? next_rq->cpu : -1);
@@ -816,8 +827,16 @@ static void enqueue_task_ipanema(struct rq *rq,
 		       rq->cpu, rq, flags);
 
 end:
-	add_nr_running(rq, 1);
-	rq->nr_ipanema_running++;
+	/*
+	 * est-ce qu'on peut laisser le comportement par defaut pour les rq qui ne osnt
+	 * pas per_cpu ?
+	 */
+	if (p->ipanema.rq->is_per_cpu) {
+		add_nr_running(rq, 1);
+		rq->nr_ipanema_running++;
+	}
+
+	atomic64_inc(&__nr_ipanema_running);
 }
 
 static void update_curr_ipanema(struct rq *rq)
@@ -964,8 +983,13 @@ static void dequeue_task_ipanema(struct rq *rq,
 		rq->cpu, rq, flags);
 
 end:
-	sub_nr_running(rq, 1);
-	rq->nr_ipanema_running--;
+	/* idem enqueue */
+	if (p->ipanema.rq->is_per_cpu) {
+		sub_nr_running(rq, 1);
+		rq->nr_ipanema_running--;
+	}
+
+	atomic64_dec(&__nr_ipanema_running);
 }
 
 static void yield_task_ipanema(struct rq *rq)
