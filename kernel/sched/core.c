@@ -6067,6 +6067,8 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 	put_prev_task(rq, prev);
 }
 
+extern atomic64_t __nr_ipanema_running;
+
 /*
  * Pick up the highest-prio task:
  */
@@ -6075,6 +6077,7 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	const struct sched_class *class;
 	struct task_struct *p;
+	s64 nr_ipa = atomic64_read(&__nr_ipanema_running);
 
 	/*
 	 * Optimization: we know that if all tasks are in the fair class we can
@@ -6083,7 +6086,7 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 	 * opportunity to pull in more work from other CPUs.
 	 */
 	if (likely(!sched_class_above(prev->sched_class, &fair_sched_class) &&
-		   rq->nr_running == rq->cfs.h_nr_running)) {
+		   (rq->nr_running + nr_ipa) == rq->cfs.h_nr_running)) {
 
 		p = pick_next_task_fair(rq, prev, rf);
 		if (unlikely(p == RETRY_TASK))

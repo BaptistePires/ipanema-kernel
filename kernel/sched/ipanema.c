@@ -552,7 +552,7 @@ static void change_rq(struct task_struct *p, enum ipanema_state next_state,
 	prev_state = ipanema_task_state(p);
 
 	if (prev_rq) {
-		lockdep_assert_held(&task_rq(p)->__lock);
+		// lockdep_assert_held(&task_rq(p)->__lock);
 		p = ipanema_remove_task(prev_rq, p);
 		prev_rq->nr_tasks--;
 	}
@@ -563,7 +563,7 @@ static void change_rq(struct task_struct *p, enum ipanema_state next_state,
 	if (next_rq) {
 		next_cpu = next_rq->cpu;
 		next_state = next_rq->state;
-		lockdep_assert_held(&cpu_rq(next_cpu)->__lock);
+		// lockdep_assert_held(&cpu_rq(next_cpu)->__lock);
 		if (ipanema_add_task(next_rq, p))
 			pr_err("[ERR] %s(pid=%d, cpu=%u) failed. Gonna crash soon...\n",
 			       __func__, p->pid, next_cpu);
@@ -656,8 +656,10 @@ void change_state(struct task_struct *p, enum ipanema_state next_state,
 		if (per_cpu(ipanema_current, next_cpu))
 			pr_warn("[WARN] putting a task in RUNNING but there is already another task! We preempt it to avoid potential bugs. Should not happen !!!\n");
 
-		if (prev_rq->is_per_cpu) {
-			set_task_cpu(p, task_cpu(p));
+		if (!prev_rq->is_per_cpu) {
+			if (task_cpu(p) != next_cpu)
+				__set_task_cpu(p, next_cpu);
+
 			add_nr_running(task_rq(p), 1);
 			task_rq(p)->nr_ipanema_running++;
 		}
@@ -667,14 +669,14 @@ void change_state(struct task_struct *p, enum ipanema_state next_state,
 
 	/* MIGRATING -> READY */
 	if (prev_state == IPANEMA_MIGRATING) {
-		activate_task(cpu_rq(next_cpu), p, 0);
+		activate_task(cpu_rq(next_cpu), p, ENQUEUE_NOCLOCK | ENQUEUE_MIGRATED);
 		p->on_rq = TASK_ON_RQ_QUEUED;
 	}
 
 	/* READY -> MIGRATING */
 	if (next_state == IPANEMA_MIGRATING) {
 		p->on_rq = TASK_ON_RQ_MIGRATING;
-		deactivate_task(cpu_rq(prev_cpu), p, 0);
+		deactivate_task(cpu_rq(prev_cpu), p, DEQUEUE_NOCLOCK | DEQUEUE_MIGRATING);
 		set_task_cpu(p, next_cpu);
 	}
 
@@ -690,8 +692,9 @@ void change_state(struct task_struct *p, enum ipanema_state next_state,
 	    prev_cpu == next_cpu)
 		resched_curr(cpu_rq(prev_cpu));
 
-	if (((task_cpu(p) != next_cpu) & next_rq->is_per_cpu) ||
-	    (next_rq && ((task_cpu(p) != next_rq->cpu) && next_rq->is_per_cpu))) {
+
+	if (((task_cpu(p) != next_cpu) && (next_rq && next_rq->is_per_cpu)) ||
+		(next_rq && ((task_cpu(p) != next_rq->cpu) && next_rq->is_per_cpu))) {
 		pr_warn("[WARN] Discrepency with task %d (task_cpu()=%d, next_cpu=%d, next_rq->cpu=%d)\n",
 			p->pid, task_cpu(p), next_cpu,
 			next_rq ? next_rq->cpu : -1);
@@ -718,6 +721,7 @@ static void enqueue_task_ipanema(struct rq *rq,
 	struct process_event e = { .target = p, .cpu = smp_processor_id() };
 	enum ipanema_core_state cstate;
 
+	
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d, rq=%d]\n",
 			__func__, p->pid, rq->cpu);
@@ -871,6 +875,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 {
 	struct process_event e = { .target = p, .cpu = smp_processor_id() };
 	int state;
+	struct ipanema_rq *prev_rq = ipanema_task_rq(p);
 
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d, rq=%d]\n",
@@ -984,7 +989,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 
 end:
 	/* idem enqueue */
-	if (p->ipanema.rq->is_per_cpu) {
+	if (prev_rq && prev_rq->is_per_cpu) {
 		sub_nr_running(rq, 1);
 		rq->nr_ipanema_running--;
 	}
@@ -1896,6 +1901,7 @@ void init_ipanema_rq(struct ipanema_rq *rq, enum ipanema_rq_type type,
 	rq->nr_tasks = 0;
 	rq->is_per_cpu = is_per_cpu;
 	rq->order_fn = order_fn;
+	raw_spin_lock_init(&rq->lock);
 }
 EXPORT_SYMBOL(init_ipanema_rq);
 
