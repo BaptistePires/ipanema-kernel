@@ -1223,7 +1223,7 @@ static int select_task_rq_ipanema(struct task_struct *p,
 				  int prev_cpu,
 				  int wake_flags)
 {
-	struct process_event e = { .target = p, .cpu = smp_processor_id() };
+	struct process_event e = { .target = p, .cpu = smp_processor_id(), .flags= wake_flags };
 	int ret = task_cpu(p);
 
 	if (unlikely(ipanema_sched_class_log))
