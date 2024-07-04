@@ -1182,8 +1182,18 @@ static void put_prev_task_ipanema(struct rq *rq,
 static int balance_ipanema(struct rq *rq, struct task_struct *prev,
 			   struct rq_flags *rf)
 {
+	struct ipanema_policy *policy;
+	unsigned long flags;
+
 	if (rq->nr_running)
 		return 1;
+
+	read_lock_irqsave(&ipanema_rwlock, flags);
+	list_for_each_entry(policy, &ipanema_policies, list) {
+		ipanema_newly_idle(policy, rq->cpu, rf);
+	}
+	read_unlock_irqrestore(&ipanema_rwlock, flags);
+
 	return 0;
 }
 
