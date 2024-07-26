@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include "linux/export.h"
+#include "linux/list.h"
 #include "linux/proc_fs.h"
 
 
@@ -16,6 +18,7 @@
 #include <linux/kref.h>
 #include <trace/events/sched.h>
 #include <linux/sched/cputime.h>
+#include <linux/sched.h>
 
 LIST_HEAD(ipanema_policies);
 s64 num_ipanema_policies;
@@ -49,6 +52,19 @@ void ipanema_unlock_core(unsigned int id)
 	raw_spin_unlock(&cpu_rq(id)->__lock);
 }
 EXPORT_SYMBOL(ipanema_unlock_core);
+
+void ipanema_double_lock_core(unsigned int cpu1, unsigned int cpu2)
+{
+	double_rq_lock(cpu_rq(cpu1), cpu_rq(cpu2));
+}
+EXPORT_SYMBOL(ipanema_double_lock_core);
+
+void ipanema_double_unlock_core(unsigned int cpu1, unsigned int cpu2)
+{
+	double_rq_unlock(cpu_rq(cpu1), cpu_rq(cpu2));
+}
+EXPORT_SYMBOL(ipanema_double_unlock_core);
+
 
 static bool __ipanema_policy_exists_nolock(struct ipanema_policy *policy)
 {
@@ -546,8 +562,10 @@ static void change_rq(struct task_struct *p, enum ipanema_state next_state,
 	prev_state = ipanema_task_state(p);
 
 	if (prev_rq) {
-		lockdep_assert_held(&task_rq(p)->__lock);
-		p = ipanema_remove_task(prev_rq, p);
+		if (!prev_rq->is_global)
+			lockdep_assert_held(&task_rq(p)->__lock);
+		if (!list_empty(&p->ipanema.ipa_tasks))
+			p = ipanema_remove_task(prev_rq, p);
 		prev_rq->nr_tasks--;
 	}
 
@@ -557,7 +575,8 @@ static void change_rq(struct task_struct *p, enum ipanema_state next_state,
 	if (next_rq) {
 		next_cpu = next_rq->cpu;
 		next_state = next_rq->state;
-		lockdep_assert_held(&cpu_rq(next_cpu)->__lock);
+		if (!next_rq->is_global)
+			lockdep_assert_held(&cpu_rq(next_cpu)->__lock);
 		if (ipanema_add_task(next_rq, p))
 			pr_err("[ERR] %s(pid=%d, cpu=%u) failed. Gonna crash soon...\n",
 			       __func__, p->pid, next_cpu);
@@ -600,15 +619,15 @@ void change_state(struct task_struct *p, enum ipanema_state next_state,
 	    next_state == IPANEMA_TERMINATED)
 		next_rq = NULL;
 	if (next_rq) {
-		if (next_cpu != next_rq->cpu ||
+		if (((next_cpu != next_rq->cpu) && !next_rq->is_global) ||
 		    (next_state != next_rq->state &&
 		     next_state != IPANEMA_READY_TICK &&
 		     next_rq->state != IPANEMA_READY)) {
-			pr_warn("[WARN] %s: Discrepancy in parameters: next_state = %s; next_cpu = %d, next_rq = [cpu=%d, state=%s]. Using next_rq values\n",
+			pr_warn("[WARN] %s: Discrepancy in parameters: next_state = %s; next_cpu = %d, next_rq = [cpu=%d, state=%s, is_global=%d]. Using next_rq values\n",
 				__func__,
 				ipanema_state_to_str(next_state),
 				next_cpu, next_rq->cpu,
-				ipanema_state_to_str(next_rq->state));
+				ipanema_state_to_str(next_rq->state), next_rq->is_global);
 
 #ifdef CONFIG_IPANEMA_PANIC_ON_BAD_TRANSITION
 			BUG();
@@ -676,8 +695,8 @@ void change_state(struct task_struct *p, enum ipanema_state next_state,
 	    prev_cpu == next_cpu)
 		resched_curr(cpu_rq(prev_cpu));
 
-	if (task_cpu(p) != next_cpu ||
-	    (next_rq && task_cpu(p) != next_rq->cpu)) {
+	if (((task_cpu(p) != next_cpu) && (next_rq && !next_rq->is_global)) ||
+	    (next_rq && !next_rq->is_global && task_cpu(p) != next_rq->cpu)) {
 		pr_warn("[WARN] Discrepency with task %d (task_cpu()=%d, next_cpu=%d, next_rq->cpu=%d)\n",
 			p->pid, task_cpu(p), next_cpu,
 			next_rq ? next_rq->cpu : -1);
@@ -1201,7 +1220,7 @@ static int select_task_rq_ipanema(struct task_struct *p,
 				  int prev_cpu,
 				  int wake_flags)
 {
-	struct process_event e = { .target = p, .cpu = smp_processor_id() };
+	struct process_event e = { .target = p, .cpu = smp_processor_id(), .flags = wake_flags};
 	int ret = task_cpu(p);
 
 	if (unlikely(ipanema_sched_class_log))
@@ -1843,6 +1862,7 @@ struct task_struct *ipanema_remove_task(struct ipanema_rq *rq,
 		return NULL;
 	}
 }
+EXPORT_SYMBOL(ipanema_remove_task);
 
 struct task_struct *ipanema_first_task(struct ipanema_rq *rq)
 {
@@ -1860,6 +1880,7 @@ EXPORT_SYMBOL(ipanema_first_task);
 
 void init_ipanema_rq(struct ipanema_rq *rq, enum ipanema_rq_type type,
 		     unsigned int cpu, enum ipanema_state state,
+		     unsigned int is_global,
 		     int (*order_fn)(struct task_struct *a,
 				     struct task_struct *b))
 {
@@ -1877,6 +1898,7 @@ void init_ipanema_rq(struct ipanema_rq *rq, enum ipanema_rq_type type,
 	rq->state = state;
 	rq->nr_tasks = 0;
 	rq->order_fn = order_fn;
+	rq->is_global = is_global;
 }
 EXPORT_SYMBOL(init_ipanema_rq);
 

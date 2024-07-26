@@ -47,6 +47,7 @@
 #include <linux/uidgid_types.h>
 #include <asm/kmap_size.h>
 
+
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
 struct bio_list;
@@ -751,6 +752,9 @@ enum ipanema_state {
 	 */
 	IPANEMA_READY_TICK
 };
+
+
+
 
 static inline const char *
 ipanema_state_to_str(const enum ipanema_state s)

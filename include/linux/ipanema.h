@@ -23,11 +23,13 @@ struct ipanema_rq {
 	unsigned int cpu;
 	enum ipanema_state state;
 	unsigned int nr_tasks;
+	unsigned int is_global;
 	int (*order_fn)(struct task_struct *a, struct task_struct *b);
 };
 
 void init_ipanema_rq(struct ipanema_rq *rq, enum ipanema_rq_type type,
 		     unsigned int cpu, enum ipanema_state state,
+		     unsigned int is_global,
 		     int (*order_fn)(struct task_struct *a,
 				     struct task_struct *b));
 
@@ -47,11 +49,14 @@ struct ipanema_runtime_metadata;
 struct process_event {
 	struct task_struct *target;
 	int cpu;
+	int flags;
 };
 
 struct core_event {
 	unsigned int target; // Ipanema core
 };
+
+#define IPANEMA_WF_EXEC 0x2
 
 struct ipanema_policy {
 	struct module *kmodule;
@@ -156,7 +161,8 @@ int count(enum ipanema_state state, unsigned int cpu);
 extern void ipanema_lock_core(unsigned int id);
 extern int ipanema_trylock_core(unsigned int id);
 extern void ipanema_unlock_core(unsigned int id);
-
+extern void ipanema_double_lock_core(unsigned int cpu1, unsigned int cpu2);
+extern void ipanema_double_unlock_core(unsigned int cpu1, unsigned int cpu2);
 extern int ipanema_just_queued(struct task_struct *p);
 
 struct task_struct *pick_next_task_ipanema(struct rq *rq);
