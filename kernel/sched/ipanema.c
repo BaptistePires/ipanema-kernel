@@ -546,7 +546,7 @@ static void change_rq(struct task_struct *p, enum ipanema_state next_state,
 	prev_state = ipanema_task_state(p);
 
 	if (prev_rq) {
-		lockdep_assert_held(&task_rq(p)->__lock);
+		lockdep_assert_held(&cpu_rq(prev_rq->cpu)->__lock);
 		p = ipanema_remove_task(prev_rq, p);
 		prev_rq->nr_tasks--;
 	}
@@ -564,6 +564,7 @@ static void change_rq(struct task_struct *p, enum ipanema_state next_state,
 		next_rq->nr_tasks++;
 	}
 }
+
 
 /*
  * Main function handling state change of an ipanema task
@@ -796,6 +797,7 @@ static void enqueue_task_ipanema(struct rq *rq,
 		if (cstate == IPANEMA_IDLE_CORE)
 			ipanema_exit_idle(ipanema_task_policy(p),
 					  rq->cpu);
+		lockdep_assert_rq_held(rq);
 		ipanema_unblock_place(&e);
 		goto end;
 	}
