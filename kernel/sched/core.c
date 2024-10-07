@@ -2526,7 +2526,7 @@ static struct rq *move_queued_task(struct rq *rq, struct rq_flags *rf,
 {
 	lockdep_assert_rq_held(rq);
 
-	deactivate_task(rq, p, DEQUEUE_NOCLOCK);
+	deactivate_task(rq, p, DEQUEUE_NOCLOCK | OUSTED);
 	set_task_cpu(p, new_cpu);
 	rq_unlock(rq, rf);
 
@@ -2534,7 +2534,7 @@ static struct rq *move_queued_task(struct rq *rq, struct rq_flags *rf,
 
 	rq_lock(rq, rf);
 	WARN_ON_ONCE(task_cpu(p) != new_cpu);
-	activate_task(rq, p, 0);
+	activate_task(rq, p, 0 | OUSTED);
 	wakeup_preempt(rq, p, 0);
 
 	return rq;
@@ -7298,7 +7298,7 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 	}
 
 out_class_choice:
-	
+
 	__setscheduler_prio(p, prio);
 
 	if (queued)
