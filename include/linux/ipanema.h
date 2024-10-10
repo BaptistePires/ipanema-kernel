@@ -10,6 +10,15 @@
 
 #ifdef __KERNEL__
 
+/* Wake flags. The first three directly map to some SD flag value */
+#define IPANEMA_WF_EXEC         0x02 /* Wakeup after exec; maps to SD_BALANCE_EXEC */
+#define IPANEMA_WF_FORK         0x04 /* Wakeup after fork; maps to SD_BALANCE_FORK */
+#define IPANEMA_WF_TTWU         0x08 /* Wakeup;            maps to SD_BALANCE_WAKE */
+
+#define IPANEMA_WF_SYNC         0x10 /* Waker goes to sleep after wakeup */
+#define IPANEMA_WF_MIGRATED     0x20 /* Internal use, task got migrated */
+#define IPANEMA_WF_CURRENT_CPU  0x40 /* Prefer to move the wakee to the current CPU. */
+
 enum ipanema_core_state { IPANEMA_ACTIVE_CORE, IPANEMA_IDLE_CORE };
 
 enum ipanema_rq_type { RBTREE, LIST, FIFO };
@@ -47,6 +56,7 @@ struct ipanema_runtime_metadata;
 struct process_event {
 	struct task_struct *target;
 	int cpu;
+	int flags;
 };
 
 struct core_event {
