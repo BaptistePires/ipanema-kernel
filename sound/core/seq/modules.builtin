@@ -1,0 +1,2 @@
+sound/core/seq/snd-seq.ko
+sound/core/seq/snd-seq-dummy.ko
