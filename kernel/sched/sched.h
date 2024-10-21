@@ -2278,7 +2278,7 @@ extern const u32		sched_prio_to_wmult[40];
 
 #define SWITCHING_CLASS         0x200
 #define ATTR_CHANGE             0x400
-#define OUSTED                  0x600
+#define OUSTED                  0x800
 
 #define RETRY_TASK		((void *)-1UL)
 
