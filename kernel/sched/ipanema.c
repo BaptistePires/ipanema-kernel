@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include "asm-generic/rwonce.h"
 #define pr_fmt(fmt) "ipanema: " fmt
 
 #include "sched.h"
@@ -779,7 +780,7 @@ static void enqueue_task_ipanema(struct rq *rq,
 	 * cpu. It will be placed on a cpu handled by the policy and authorized
 	 * for this thread.
 	 */
-	if (p->state == TASK_WAKING ||
+	if (READ_ONCE(p->__state) == TASK_WAKING ||
 	    (flags & OUSTED && task_on_rq_migrating(p))) {
 		/*
 		 * If unblock_prepare() chose an IDLE cpu, we must call the
@@ -802,7 +803,7 @@ static void enqueue_task_ipanema(struct rq *rq,
 		goto end;
 
 	pr_warn("[WARN] Uncaught enqueue, CONTEXT: p=[pid=%d, cpu=%d, state=%ld, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
-		       p->pid, p->cpu, p->state, p->on_cpu, p->on_rq,
+		       p->pid, p->cpu, READ_ONCE(p->__state), p->on_cpu, p->on_rq,
 		       ipanema_state_to_str(ipanema_task_state(p)),
 		       rq->cpu, rq, flags);
 
@@ -841,8 +842,9 @@ static void dequeue_task_ipanema(struct rq *rq,
 				 struct task_struct *p,
 				 int flags)
 {
+	int state;
 	struct process_event e = { .target = p, .cpu = smp_processor_id() };
-
+	
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d, rq=%d]\n",
 			__func__, p->pid, rq->cpu);
@@ -905,10 +907,11 @@ static void dequeue_task_ipanema(struct rq *rq,
 	 * cpu. It will be placed on a cpu handled by the policy and authorized
 	 * for this thread.
 	 */
-	if (p->state & TASK_INTERRUPTIBLE ||
-	    p->state & TASK_UNINTERRUPTIBLE ||
-	    p->state & TASK_STOPPED ||
-	    p->state & TASK_KILLABLE ||
+	state = READ_ONCE(p->__state);
+	if (state & TASK_INTERRUPTIBLE ||
+	    state & TASK_UNINTERRUPTIBLE ||
+	    state & TASK_STOPPED ||
+	    state & TASK_KILLABLE ||
 	    (flags & OUSTED && task_on_rq_migrating(p))) {
 		ipanema_block(&e);
 		goto end;
@@ -935,7 +938,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 		goto end;
 
 	pr_warn("[WARN] Uncaught dequeue, CONTEXT: p=[pid=%d, cpu=%d, state=%ld, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
-		p->pid, p->cpu, p->state, p->on_cpu, p->on_rq,
+		p->pid, p->cpu, READ_ONCE(p->__state), p->on_cpu, p->on_rq,
 		ipanema_state_to_str(ipanema_task_state(p)),
 		rq->cpu, rq, flags);
 
@@ -1010,7 +1013,7 @@ static struct task_struct *pick_next_task_ipanema(struct rq *rq,
 	 */
 	result = per_cpu(ipanema_current, rq->cpu);
 	if (result) {
-		if (result->state != TASK_RUNNING) {
+		if (READ_ONCE(result->__state) != TASK_RUNNING) {
 			/* current has signals pending, leave it running */
 			goto end;
 		} else {
@@ -1197,7 +1200,7 @@ static int select_task_rq_ipanema(struct task_struct *p,
 				ipanema_task_policy(p)->id);
 			ret = p->cpu;
 		}
-	} else if (p->state == TASK_WAKING) {
+	} else if (READ_ONCE(p->__state) == TASK_WAKING) {
 		ret = ipanema_unblock_prepare(&e);
 		/* if migrating on wakeup, remove from previous cpu */
 		if (ret >= 0 && ret != task_cpu(p)) {
