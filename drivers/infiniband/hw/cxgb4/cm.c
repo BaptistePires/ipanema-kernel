@@ -77,9 +77,9 @@ static int enable_ecn;
 module_param(enable_ecn, int, 0644);
 MODULE_PARM_DESC(enable_ecn, "Enable ECN (default=0/disabled)");
 
-static int dack_mode = 1;
+static int dack_mode;
 module_param(dack_mode, int, 0644);
-MODULE_PARM_DESC(dack_mode, "Delayed ack mode (default=1)");
+MODULE_PARM_DESC(dack_mode, "Delayed ack mode (default=0)");
 
 uint c4iw_max_read_depth = 32;
 module_param(c4iw_max_read_depth, int, 0644);
@@ -145,7 +145,7 @@ static void connect_reply_upcall(struct c4iw_ep *ep, int status);
 static int sched(struct c4iw_dev *dev, struct sk_buff *skb);
 
 static LIST_HEAD(timeout_list);
-static spinlock_t timeout_lock;
+static DEFINE_SPINLOCK(timeout_lock);
 
 static void deref_cm_id(struct c4iw_ep_common *epc)
 {
@@ -2468,30 +2468,24 @@ static int accept_cr(struct c4iw_ep *ep, struct sk_buff *skb,
 			opt2 |= CCTRL_ECN_V(1);
 	}
 
-	skb_get(skb);
-	rpl = cplhdr(skb);
 	if (!is_t4(adapter_type)) {
-		skb_trim(skb, roundup(sizeof(*rpl5), 16));
-		rpl5 = (void *)rpl;
-		INIT_TP_WR(rpl5, ep->hwtid);
-	} else {
-		skb_trim(skb, sizeof(*rpl));
-		INIT_TP_WR(rpl, ep->hwtid);
-	}
-	OPCODE_TID(rpl) = cpu_to_be32(MK_OPCODE_TID(CPL_PASS_ACCEPT_RPL,
-						    ep->hwtid));
-
-	if (CHELSIO_CHIP_VERSION(adapter_type) > CHELSIO_T4) {
 		u32 isn = (prandom_u32() & ~7UL) - 1;
+
+		skb = get_skb(skb, roundup(sizeof(*rpl5), 16), GFP_KERNEL);
+		rpl5 = __skb_put_zero(skb, roundup(sizeof(*rpl5), 16));
+		rpl = (void *)rpl5;
+		INIT_TP_WR_CPL(rpl5, CPL_PASS_ACCEPT_RPL, ep->hwtid);
 		opt2 |= T5_OPT_2_VALID_F;
 		opt2 |= CONG_CNTRL_V(CONG_ALG_TAHOE);
 		opt2 |= T5_ISS_F;
-		rpl5 = (void *)rpl;
-		memset(&rpl5->iss, 0, roundup(sizeof(*rpl5)-sizeof(*rpl), 16));
 		if (peer2peer)
 			isn += 4;
 		rpl5->iss = cpu_to_be32(isn);
 		pr_debug("iss %u\n", be32_to_cpu(rpl5->iss));
+	} else {
+		skb = get_skb(skb, sizeof(*rpl), GFP_KERNEL);
+		rpl = __skb_put_zero(skb, sizeof(*rpl));
+		INIT_TP_WR_CPL(rpl, CPL_PASS_ACCEPT_RPL, ep->hwtid);
 	}
 
 	rpl->opt0 = cpu_to_be64(opt0);
@@ -3610,13 +3604,14 @@ int c4iw_destroy_listen(struct iw_cm_id *cm_id)
 	    ep->com.local_addr.ss_family == AF_INET) {
 		err = cxgb4_remove_server_filter(
 			ep->com.dev->rdev.lldi.ports[0], ep->stid,
-			ep->com.dev->rdev.lldi.rxq_ids[0], 0);
+			ep->com.dev->rdev.lldi.rxq_ids[0], false);
 	} else {
 		struct sockaddr_in6 *sin6;
 		c4iw_init_wr_wait(ep->com.wr_waitp);
 		err = cxgb4_remove_server(
 				ep->com.dev->rdev.lldi.ports[0], ep->stid,
-				ep->com.dev->rdev.lldi.rxq_ids[0], 0);
+				ep->com.dev->rdev.lldi.rxq_ids[0],
+				ep->com.local_addr.ss_family == AF_INET6);
 		if (err)
 			goto done;
 		err = c4iw_wait_for_reply(&ep->com.dev->rdev, ep->com.wr_waitp,
@@ -4451,7 +4446,6 @@ c4iw_handler_func c4iw_handlers[NUM_CPL_CMDS] = {
 
 int __init c4iw_cm_init(void)
 {
-	spin_lock_init(&timeout_lock);
 	skb_queue_head_init(&rxq);
 
 	workq = alloc_ordered_workqueue("iw_cxgb4", WQ_MEM_RECLAIM);
@@ -4464,6 +4458,5 @@ int __init c4iw_cm_init(void)
 void c4iw_cm_term(void)
 {
 	WARN_ON(!list_empty(&timeout_list));
-	flush_workqueue(workq);
 	destroy_workqueue(workq);
 }

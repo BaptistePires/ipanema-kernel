@@ -1,0 +1,12 @@
+net/ipv6/ipv6.ko
+net/ipv6/ah6.ko
+net/ipv6/esp6.ko
+net/ipv6/sit.ko
+net/ipv6/inet6_hashtables.ko
+net/ipv6/netfilter/ip6_tables.ko
+net/ipv6/netfilter/ip6table_filter.ko
+net/ipv6/netfilter/ip6table_mangle.ko
+net/ipv6/netfilter/nf_defrag_ipv6.ko
+net/ipv6/netfilter/nf_reject_ipv6.ko
+net/ipv6/netfilter/ip6t_ipv6header.ko
+net/ipv6/netfilter/ip6t_REJECT.ko

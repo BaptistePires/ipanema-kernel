@@ -510,7 +510,7 @@ static int meson_nfc_dma_buffer_setup(struct nand_chip *nand, void *databuf,
 }
 
 static void meson_nfc_dma_buffer_release(struct nand_chip *nand,
-					 int infolen, int datalen,
+					 int datalen, int infolen,
 					 enum dma_data_direction dir)
 {
 	struct meson_nfc *nfc = nand_get_controller_data(nand);
@@ -580,7 +580,7 @@ static int meson_nfc_rw_cmd_prepare_and_execute(struct nand_chip *nand,
 	u32 *addrs = nfc->cmdfifo.rw.addrs;
 	u32 cs = nfc->param.chip_select;
 	u32 cmd0, cmd_num, row_start;
-	int ret = 0, i;
+	int i;
 
 	cmd_num = sizeof(struct nand_rw_cmd) / sizeof(int);
 
@@ -620,7 +620,7 @@ static int meson_nfc_rw_cmd_prepare_and_execute(struct nand_chip *nand,
 		meson_nfc_cmd_idle(nfc, nfc->timing.tadl);
 	}
 
-	return ret;
+	return 0;
 }
 
 static int meson_nfc_write_page_sub(struct nand_chip *nand,
@@ -1044,9 +1044,12 @@ static int meson_nfc_clk_init(struct meson_nfc *nfc)
 
 	ret = clk_set_rate(nfc->device_clk, 24000000);
 	if (ret)
-		goto err_phase_rx;
+		goto err_disable_rx;
 
 	return 0;
+
+err_disable_rx:
+	clk_disable_unprepare(nfc->phase_rx);
 err_phase_rx:
 	clk_disable_unprepare(nfc->phase_tx);
 err_phase_tx:
@@ -1197,7 +1200,7 @@ static int meson_nand_attach_chip(struct nand_chip *nand)
 	if (ret)
 		return -EINVAL;
 
-	nand->ecc.mode = NAND_ECC_HW;
+	nand->ecc.engine_type = NAND_ECC_ENGINE_TYPE_ON_HOST;
 	nand->ecc.write_page_raw = meson_nfc_write_page_raw;
 	nand->ecc.write_page = meson_nfc_write_page_hwecc;
 	nand->ecc.write_oob_raw = nand_write_oob_std;
@@ -1290,26 +1293,20 @@ meson_nfc_nand_chip_init(struct device *dev,
 	return 0;
 }
 
-static int meson_nfc_nand_chip_cleanup(struct meson_nfc *nfc)
+static void meson_nfc_nand_chip_cleanup(struct meson_nfc *nfc)
 {
 	struct meson_nfc_nand_chip *meson_chip;
 	struct mtd_info *mtd;
-	int ret;
 
 	while (!list_empty(&nfc->chips)) {
 		meson_chip = list_first_entry(&nfc->chips,
 					      struct meson_nfc_nand_chip, node);
 		mtd = nand_to_mtd(&meson_chip->nand);
-		ret = mtd_device_unregister(mtd);
-		if (ret)
-			return ret;
+		WARN_ON(mtd_device_unregister(mtd));
 
-		meson_nfc_free_buffer(&meson_chip->nand);
 		nand_cleanup(&meson_chip->nand);
 		list_del(&meson_chip->node);
 	}
-
-	return 0;
 }
 
 static int meson_nfc_nand_chips_init(struct device *dev,
@@ -1442,15 +1439,10 @@ err_clk:
 static int meson_nfc_remove(struct platform_device *pdev)
 {
 	struct meson_nfc *nfc = platform_get_drvdata(pdev);
-	int ret;
 
-	ret = meson_nfc_nand_chip_cleanup(nfc);
-	if (ret)
-		return ret;
+	meson_nfc_nand_chip_cleanup(nfc);
 
 	meson_nfc_disable_clk(nfc);
-
-	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }

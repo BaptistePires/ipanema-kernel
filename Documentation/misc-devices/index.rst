@@ -19,12 +19,13 @@ fit into other categories.
    bh1770glc
    eeprom
    c2port
+   dw-xdata-pcie
    ibmvmc
    ics932s401
    isl29003
    lis3lv02d
    max6875
-   mic/index
+   oxsemi-tornado
    pci-endpoint-test
    spear-pcie-gadget
    uacce

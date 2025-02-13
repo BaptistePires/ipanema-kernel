@@ -1,0 +1,2 @@
+drivers/base/firmware_loader/firmware_class.ko
+drivers/base/regmap/regmap-i2c.ko

@@ -558,7 +558,7 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		ethernet: usbether@1 {
+		ethernet: ethernet@1 {
 			compatible = "usb424,ec00";
 			reg = <1>;
 		};
@@ -566,7 +566,7 @@
 };
 
 &dss {
-	status = "ok";
+	status = "okay";
 
 	port {
 		dpi_out: endpoint {
@@ -577,12 +577,12 @@
 };
 
 &dsi2 {
-	status = "ok";
+	status = "okay";
 	vdd-supply = <&vcxio>;
 };
 
 &hdmi {
-	status = "ok";
+	status = "okay";
 	vdda-supply = <&vdac>;
 
 	port {

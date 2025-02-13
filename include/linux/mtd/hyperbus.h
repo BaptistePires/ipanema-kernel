@@ -8,6 +8,17 @@
 
 #include <linux/mtd/map.h>
 
+/* HyperBus command bits */
+#define HYPERBUS_RW	0x80	/* R/W# */
+#define HYPERBUS_RW_WRITE 0
+#define HYPERBUS_RW_READ 0x80
+#define HYPERBUS_AS	0x40	/* Address Space */
+#define HYPERBUS_AS_MEM	0
+#define HYPERBUS_AS_REG	0x40
+#define HYPERBUS_BT	0x20	/* Burst Type */
+#define HYPERBUS_BT_WRAPPED 0
+#define HYPERBUS_BT_LINEAR 0x20
+
 enum hyperbus_memtype {
 	HYPERFLASH,
 	HYPERRAM,
@@ -20,6 +31,7 @@ enum hyperbus_memtype {
  * @mtd: pointer to MTD struct
  * @ctlr: pointer to HyperBus controller struct
  * @memtype: type of memory device: HyperFlash or HyperRAM
+ * @priv: pointer to controller specific per device private data
  */
 
 struct hyperbus_device {
@@ -28,6 +40,7 @@ struct hyperbus_device {
 	struct mtd_info *mtd;
 	struct hyperbus_ctlr *ctlr;
 	enum hyperbus_memtype memtype;
+	void *priv;
 };
 
 /**
@@ -76,9 +89,7 @@ int hyperbus_register_device(struct hyperbus_device *hbdev);
 /**
  * hyperbus_unregister_device - deregister HyperBus slave memory device
  * @hbdev: hyperbus_device to be unregistered
- *
- * Return: 0 for success, others for failure.
  */
-int hyperbus_unregister_device(struct hyperbus_device *hbdev);
+void hyperbus_unregister_device(struct hyperbus_device *hbdev);
 
 #endif /* __LINUX_MTD_HYPERBUS_H__ */

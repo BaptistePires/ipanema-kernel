@@ -54,6 +54,25 @@ module_param(init_nr_desc_per_channel, uint, 0644);
 MODULE_PARM_DESC(init_nr_desc_per_channel,
 		 "initial descriptors per channel (default: 64)");
 
+/**
+ * struct at_dma_platform_data - Controller configuration parameters
+ * @nr_channels: Number of channels supported by hardware (max 8)
+ * @cap_mask: dma_capability flags supported by the platform
+ */
+struct at_dma_platform_data {
+	unsigned int	nr_channels;
+	dma_cap_mask_t  cap_mask;
+};
+
+/**
+ * struct at_dma_slave - Controller-specific information about a slave
+ * @dma_dev: required DMA master device
+ * @cfg: Platform-specific initializer for the CFG register
+ */
+struct at_dma_slave {
+	struct device		*dma_dev;
+	u32			cfg;
+};
 
 /* prototypes */
 static dma_cookie_t atc_tx_submit(struct dma_async_tx_descriptor *tx);
@@ -598,9 +617,9 @@ static void atc_handle_cyclic(struct at_dma_chan *atchan)
 
 /*--  IRQ & Tasklet  ---------------------------------------------------*/
 
-static void atc_tasklet(unsigned long data)
+static void atc_tasklet(struct tasklet_struct *t)
 {
-	struct at_dma_chan *atchan = (struct at_dma_chan *)data;
+	struct at_dma_chan *atchan = from_tasklet(atchan, t, tasklet);
 
 	if (test_and_clear_bit(ATC_IS_ERROR, &atchan->status))
 		return atc_handle_error(atchan);
@@ -923,6 +942,7 @@ atc_prep_dma_memset(struct dma_chan *chan, dma_addr_t dest, int value,
 	struct at_desc		*desc;
 	void __iomem		*vaddr;
 	dma_addr_t		paddr;
+	char			fill_pattern;
 
 	dev_vdbg(chan2dev(chan), "%s: d%pad v0x%x l0x%zx f0x%lx\n", __func__,
 		&dest, value, len, flags);
@@ -944,7 +964,14 @@ atc_prep_dma_memset(struct dma_chan *chan, dma_addr_t dest, int value,
 			__func__);
 		return NULL;
 	}
-	*(u32*)vaddr = value;
+
+	/* Only the first byte of value is to be used according to dmaengine */
+	fill_pattern = (char)value;
+
+	*(u32*)vaddr = (fill_pattern << 24) |
+		       (fill_pattern << 16) |
+		       (fill_pattern << 8) |
+		       fill_pattern;
 
 	desc = atc_create_memset_desc(chan, paddr, dest, len);
 	if (!desc) {
@@ -1892,8 +1919,7 @@ static int __init at_dma_probe(struct platform_device *pdev)
 		INIT_LIST_HEAD(&atchan->queue);
 		INIT_LIST_HEAD(&atchan->free_list);
 
-		tasklet_init(&atchan->tasklet, atc_tasklet,
-				(unsigned long)atchan);
+		tasklet_setup(&atchan->tasklet, atc_tasklet);
 		atc_enable_chan_irq(atdma, i);
 	}
 

@@ -625,9 +625,8 @@ static irqreturn_t lantiq_ssc_xmit_interrupt(int irq, void *data)
 	struct lantiq_ssc_spi *spi = data;
 	const struct lantiq_ssc_hwcfg *hwcfg = spi->hwcfg;
 	u32 val = lantiq_ssc_readl(spi, hwcfg->irncr);
-	unsigned long flags;
 
-	spin_lock_irqsave(&spi->lock, flags);
+	spin_lock(&spi->lock);
 	if (hwcfg->irq_ack)
 		lantiq_ssc_writel(spi, val, hwcfg->irncr);
 
@@ -652,12 +651,12 @@ static irqreturn_t lantiq_ssc_xmit_interrupt(int irq, void *data)
 		}
 	}
 
-	spin_unlock_irqrestore(&spi->lock, flags);
+	spin_unlock(&spi->lock);
 	return IRQ_HANDLED;
 
 completed:
 	queue_work(spi->wq, &spi->work);
-	spin_unlock_irqrestore(&spi->lock, flags);
+	spin_unlock(&spi->lock);
 
 	return IRQ_HANDLED;
 }
@@ -668,12 +667,11 @@ static irqreturn_t lantiq_ssc_err_interrupt(int irq, void *data)
 	const struct lantiq_ssc_hwcfg *hwcfg = spi->hwcfg;
 	u32 stat = lantiq_ssc_readl(spi, LTQ_SPI_STAT);
 	u32 val = lantiq_ssc_readl(spi, hwcfg->irncr);
-	unsigned long flags;
 
 	if (!(stat & LTQ_SPI_STAT_ERRORS))
 		return IRQ_NONE;
 
-	spin_lock_irqsave(&spi->lock, flags);
+	spin_lock(&spi->lock);
 	if (hwcfg->irq_ack)
 		lantiq_ssc_writel(spi, val, hwcfg->irncr);
 
@@ -697,7 +695,7 @@ static irqreturn_t lantiq_ssc_err_interrupt(int irq, void *data)
 	if (spi->master->cur_msg)
 		spi->master->cur_msg->status = -EIO;
 	queue_work(spi->wq, &spi->work);
-	spin_unlock_irqrestore(&spi->lock, flags);
+	spin_unlock(&spi->lock);
 
 	return IRQ_HANDLED;
 }
@@ -908,17 +906,11 @@ static int lantiq_ssc_probe(struct platform_device *pdev)
 	struct spi_master *master;
 	struct lantiq_ssc_spi *spi;
 	const struct lantiq_ssc_hwcfg *hwcfg;
-	const struct of_device_id *match;
 	u32 id, supports_dma, revision;
 	unsigned int num_cs;
 	int err;
 
-	match = of_match_device(lantiq_ssc_match, dev);
-	if (!match) {
-		dev_err(dev, "no device match\n");
-		return -EINVAL;
-	}
-	hwcfg = match->data;
+	hwcfg = of_device_get_match_data(dev);
 
 	master = spi_alloc_master(dev, sizeof(struct lantiq_ssc_spi));
 	if (!master)

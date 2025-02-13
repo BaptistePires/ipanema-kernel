@@ -82,6 +82,7 @@ struct plist;
 #define  NAME_DISTRIBUTOR     11
 #define  MSG_FRAGMENTER       12
 #define  LINK_CONFIG          13
+#define  MSG_CRYPTO           14
 #define  SOCK_WAKEUP          14       /* pseudo user */
 #define  TOP_SRV              15       /* pseudo user */
 
@@ -98,8 +99,9 @@ struct plist;
 #define MAX_H_SIZE                60	/* Largest possible TIPC header size */
 
 #define MAX_MSG_SIZE (MAX_H_SIZE + TIPC_MAX_USER_MSG_SIZE)
-#define FB_MTU                  3744
 #define TIPC_MEDIA_INFO_OFFSET	5
+
+extern const int one_page_mtu;
 
 struct tipc_skb_cb {
 	union {
@@ -127,7 +129,9 @@ struct tipc_skb_cb {
 #ifdef CONFIG_TIPC_CRYPTO
 			u8 encrypted:1;
 			u8 decrypted:1;
-			u8 probe:1;
+#define SKB_PROBING	1
+#define SKB_GRACING	2
+			u8 xmit_type:2;
 			u8 tx_clone_deferred:1;
 #endif
 		};
@@ -220,14 +224,6 @@ static inline void msg_set_bits(struct tipc_msg *m, u32 w,
 	mask = mask << pos;
 	m->hdr[w] &= ~htonl(mask);
 	m->hdr[w] |= htonl(val);
-}
-
-static inline void msg_swap_words(struct tipc_msg *msg, u32 a, u32 b)
-{
-	u32 temp = msg->hdr[a];
-
-	msg->hdr[a] = msg->hdr[b];
-	msg->hdr[b] = temp;
 }
 
 /*
@@ -474,11 +470,6 @@ static inline u32 msg_reroute_cnt(struct tipc_msg *m)
 static inline void msg_incr_reroute_cnt(struct tipc_msg *m)
 {
 	msg_set_bits(m, 1, 21, 0xf, msg_reroute_cnt(m) + 1);
-}
-
-static inline void msg_reset_reroute_cnt(struct tipc_msg *m)
-{
-	msg_set_bits(m, 1, 21, 0xf, 0);
 }
 
 static inline u32 msg_lookup_scope(struct tipc_msg *m)
@@ -747,6 +738,9 @@ static inline void msg_set_nameupper(struct tipc_msg *m, u32 n)
 #define GRP_RECLAIM_MSG      4
 #define GRP_REMIT_MSG        5
 
+/* Crypto message types */
+#define KEY_DISTR_MSG		0
+
 /*
  * Word 1
  */
@@ -791,11 +785,6 @@ static inline u32 msg_dest_domain(struct tipc_msg *m)
 static inline void msg_set_dest_domain(struct tipc_msg *m, u32 n)
 {
 	msg_set_word(m, 2, n);
-}
-
-static inline u32 msg_bcgap_after(struct tipc_msg *m)
-{
-	return msg_bits(m, 2, 16, 0xffff);
 }
 
 static inline void msg_set_bcgap_after(struct tipc_msg *m, u32 n)
@@ -857,11 +846,6 @@ static inline u16 msg_next_sent(struct tipc_msg *m)
 }
 
 static inline void msg_set_next_sent(struct tipc_msg *m, u16 n)
-{
-	msg_set_bits(m, 4, 0, 0xffff, n);
-}
-
-static inline void msg_set_long_msgno(struct tipc_msg *m, u32 n)
 {
 	msg_set_bits(m, 4, 0, 0xffff, n);
 }

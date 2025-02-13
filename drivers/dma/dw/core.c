@@ -29,9 +29,6 @@
  * (DW_ahb_dmac) which is used with various AMBA 2.0 systems (not all
  * of which use ARM any more).  See the "Databook" from Synopsys for
  * information beyond what licensees probably provide.
- *
- * The driver has been tested with the Atmel AT32AP7000, which does not
- * support descriptor writeback.
  */
 
 /* The set of bus widths supported by the DMA controller */
@@ -463,9 +460,9 @@ static void dwc_handle_error(struct dw_dma *dw, struct dw_dma_chan *dwc)
 	dwc_descriptor_complete(dwc, bad_desc, true);
 }
 
-static void dw_dma_tasklet(unsigned long data)
+static void dw_dma_tasklet(struct tasklet_struct *t)
 {
-	struct dw_dma *dw = (struct dw_dma *)data;
+	struct dw_dma *dw = from_tasklet(dw, t, tasklet);
 	struct dw_dma_chan *dwc;
 	u32 status_xfer;
 	u32 status_err;
@@ -723,7 +720,7 @@ slave_sg_fromdev_fill_desc:
 			lli_write(desc, sar, reg);
 			lli_write(desc, dar, mem);
 			lli_write(desc, ctlhi, ctlhi);
-			mem_width = __ffs(data_width | mem | dlen);
+			mem_width = __ffs(data_width | mem);
 			lli_write(desc, ctllo, ctllo | DWC_CTLL_DST_WIDTH(mem_width));
 			desc->len = dlen;
 
@@ -770,6 +767,10 @@ bool dw_dma_filter(struct dma_chan *chan, void *param)
 	struct dw_dma_slave *dws = param;
 
 	if (dws->dma_dev != chan->device->dev)
+		return false;
+
+	/* permit channels in accordance with the channels mask */
+	if (dws->channels && !(dws->channels & dwc->mask))
 		return false;
 
 	/* We have to copy data since dws can be temporary storage */
@@ -1138,7 +1139,7 @@ int do_dma_probe(struct dw_dma_chip *chip)
 		goto err_pdata;
 	}
 
-	tasklet_init(&dw->tasklet, dw_dma_tasklet, (unsigned long)dw);
+	tasklet_setup(&dw->tasklet, dw_dma_tasklet);
 
 	err = request_irq(chip->irq, dw_dma_interrupt, IRQF_SHARED,
 			  dw->name, dw);

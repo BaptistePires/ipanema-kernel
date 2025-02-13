@@ -38746,12 +38746,14 @@
 #define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_GC_CONT__SHIFT                                                     0x5
 #define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_ISRC_SEND__SHIFT                                                   0x8
 #define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_ISRC_CONT__SHIFT                                                   0x9
+#define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_ACP_SEND__SHIFT                                                    0xc
 #define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_ISRC_LINE__SHIFT                                                   0x10
 #define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_NULL_SEND_MASK                                                     0x00000001L
 #define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_GC_SEND_MASK                                                       0x00000010L
 #define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_GC_CONT_MASK                                                       0x00000020L
 #define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_ISRC_SEND_MASK                                                     0x00000100L
 #define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_ISRC_CONT_MASK                                                     0x00000200L
+#define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_ACP_SEND_MASK                                                      0x00001000L
 #define DIG0_HDMI_VBI_PACKET_CONTROL__HDMI_ISRC_LINE_MASK                                                     0x003F0000L
 //DIG0_HDMI_INFOFRAME_CONTROL0
 #define DIG0_HDMI_INFOFRAME_CONTROL0__HDMI_AUDIO_INFO_SEND__SHIFT                                             0x4
@@ -50271,6 +50273,10 @@
 #define DSC_TOP0_DSC_TOP_CONTROL__DSC_CLOCK_EN_MASK                                                           0x00000001L
 #define DSC_TOP0_DSC_TOP_CONTROL__DSC_DISPCLK_R_GATE_DIS_MASK                                                 0x00000010L
 #define DSC_TOP0_DSC_TOP_CONTROL__DSC_DSCCLK_R_GATE_DIS_MASK                                                  0x00000100L
+//DSC_TOP0_DSC_DEBUG_CONTROL
+#define DSC_TOP0_DSC_DEBUG_CONTROL__DSC_DBG_EN__SHIFT                                                         0x0
+#define DSC_TOP0_DSC_DEBUG_CONTROL__DSC_DBG_EN_MASK                                                           0x00000001L
+
 
 // addressBlock: dce_dc_dsc0_dispdec_dsccif_dispdec
 //DSCCIF0_DSCCIF_CONFIG0
@@ -50789,6 +50795,9 @@
 #define DSC_TOP1_DSC_TOP_CONTROL__DSC_CLOCK_EN_MASK                                                           0x00000001L
 #define DSC_TOP1_DSC_TOP_CONTROL__DSC_DISPCLK_R_GATE_DIS_MASK                                                 0x00000010L
 #define DSC_TOP1_DSC_TOP_CONTROL__DSC_DSCCLK_R_GATE_DIS_MASK                                                  0x00000100L
+//DSC_TOP1_DSC_DEBUG_CONTROL
+#define DSC_TOP1_DSC_DEBUG_CONTROL__DSC_DBG_EN__SHIFT                                                         0x0
+#define DSC_TOP1_DSC_DEBUG_CONTROL__DSC_DBG_EN_MASK                                                           0x00000001L
 
 
 // addressBlock: dce_dc_dsc1_dispdec_dsccif_dispdec
@@ -51308,6 +51317,10 @@
 #define DSC_TOP2_DSC_TOP_CONTROL__DSC_CLOCK_EN_MASK                                                           0x00000001L
 #define DSC_TOP2_DSC_TOP_CONTROL__DSC_DISPCLK_R_GATE_DIS_MASK                                                 0x00000010L
 #define DSC_TOP2_DSC_TOP_CONTROL__DSC_DSCCLK_R_GATE_DIS_MASK                                                  0x00000100L
+//DSC_TOP2_DSC_DEBUG_CONTROL
+#define DSC_TOP2_DSC_DEBUG_CONTROL__DSC_DBG_EN__SHIFT                                                         0x0
+#define DSC_TOP2_DSC_DEBUG_CONTROL__DSC_DBG_EN_MASK                                                           0x00000001L
+
 
 // addressBlock: dce_dc_dsc2_dispdec_dsccif_dispdec
 //DSCCIF2_DSCCIF_CONFIG0
@@ -51826,6 +51839,9 @@
 #define DSC_TOP3_DSC_TOP_CONTROL__DSC_CLOCK_EN_MASK                                                           0x00000001L
 #define DSC_TOP3_DSC_TOP_CONTROL__DSC_DISPCLK_R_GATE_DIS_MASK                                                 0x00000010L
 #define DSC_TOP3_DSC_TOP_CONTROL__DSC_DSCCLK_R_GATE_DIS_MASK                                                  0x00000100L
+//DSC_TOP3_DSC_DEBUG_CONTROL
+#define DSC_TOP3_DSC_DEBUG_CONTROL__DSC_DBG_EN__SHIFT                                                         0x0
+#define DSC_TOP3_DSC_DEBUG_CONTROL__DSC_DBG_EN_MASK                                                           0x00000001L
 
 
 // addressBlock: dce_dc_dsc3_dispdec_dsccif_dispdec
@@ -52346,6 +52362,10 @@
 #define DSC_TOP4_DSC_TOP_CONTROL__DSC_CLOCK_EN_MASK                                                           0x00000001L
 #define DSC_TOP4_DSC_TOP_CONTROL__DSC_DISPCLK_R_GATE_DIS_MASK                                                 0x00000010L
 #define DSC_TOP4_DSC_TOP_CONTROL__DSC_DSCCLK_R_GATE_DIS_MASK                                                  0x00000100L
+//DSC_TOP4_DSC_DEBUG_CONTROL
+#define DSC_TOP4_DSC_DEBUG_CONTROL__DSC_DBG_EN__SHIFT                                                         0x0
+#define DSC_TOP4_DSC_DEBUG_CONTROL__DSC_DBG_EN_MASK                                                           0x00000001L
+
 
 // addressBlock: dce_dc_dsc4_dispdec_dsccif_dispdec
 //DSCCIF4_DSCCIF_CONFIG0
@@ -52864,6 +52884,10 @@
 #define DSC_TOP5_DSC_TOP_CONTROL__DSC_CLOCK_EN_MASK                                                           0x00000001L
 #define DSC_TOP5_DSC_TOP_CONTROL__DSC_DISPCLK_R_GATE_DIS_MASK                                                 0x00000010L
 #define DSC_TOP5_DSC_TOP_CONTROL__DSC_DSCCLK_R_GATE_DIS_MASK                                                  0x00000100L
+//DSC_TOP5_DSC_DEBUG_CONTROL
+#define DSC_TOP5_DSC_DEBUG_CONTROL__DSC_DBG_EN__SHIFT                                                         0x0
+#define DSC_TOP5_DSC_DEBUG_CONTROL__DSC_DBG_EN_MASK                                                           0x00000001L
+
 
 // addressBlock: dce_dc_dsc5_dispdec_dsccif_dispdec
 //DSCCIF5_DSCCIF_CONFIG0

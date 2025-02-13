@@ -9,6 +9,7 @@
 #include <linux/dmaengine.h>
 #include <linux/dma-mapping.h>
 #include <linux/errno.h>
+#include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/iopoll.h>
 #include <linux/mfd/syscon.h>
@@ -231,6 +232,7 @@ struct stm32_fmc2_timings {
 
 struct stm32_fmc2_nand {
 	struct nand_chip chip;
+	struct gpio_desc *wp_gpio;
 	struct stm32_fmc2_timings timings;
 	int ncs;
 	int cs_used[FMC2_MAX_CE];
@@ -531,6 +533,7 @@ static int stm32_fmc2_nfc_ham_correct(struct nand_chip *chip, u8 *dat,
 		switch (b % 4) {
 		case 2:
 			bit_position += shifting;
+			break;
 		case 1:
 			break;
 		default:
@@ -546,6 +549,7 @@ static int stm32_fmc2_nfc_ham_correct(struct nand_chip *chip, u8 *dat,
 		switch (b % 4) {
 		case 2:
 			byte_addr += shifting;
+			break;
 		case 1:
 			break;
 		default:
@@ -1696,16 +1700,24 @@ static int stm32_fmc2_nfc_attach_chip(struct nand_chip *chip)
 	int ret;
 
 	/*
-	 * Only NAND_ECC_HW mode is actually supported
+	 * Only NAND_ECC_ENGINE_TYPE_ON_HOST mode is actually supported
 	 * Hamming => ecc.strength = 1
 	 * BCH4 => ecc.strength = 4
 	 * BCH8 => ecc.strength = 8
 	 * ECC sector size = 512
 	 */
-	if (chip->ecc.mode != NAND_ECC_HW) {
-		dev_err(nfc->dev, "nand_ecc_mode is not well defined in the DT\n");
+	if (chip->ecc.engine_type != NAND_ECC_ENGINE_TYPE_ON_HOST) {
+		dev_err(nfc->dev,
+			"nand_ecc_engine_type is not well defined in the DT\n");
 		return -EINVAL;
 	}
+
+	/* Default ECC settings in case they are not set in the device tree */
+	if (!chip->ecc.size)
+		chip->ecc.size = FMC2_ECC_STEP_SIZE;
+
+	if (!chip->ecc.strength)
+		chip->ecc.strength = FMC2_ECC_BCH8;
 
 	ret = nand_ecc_choose_conf(chip, &stm32_fmc2_nfc_ecc_caps,
 				   mtd->oobsize - FMC2_BBM_LEN);
@@ -1726,8 +1738,7 @@ static int stm32_fmc2_nfc_attach_chip(struct nand_chip *chip)
 
 	mtd_set_ooblayout(mtd, &stm32_fmc2_nfc_ooblayout_ops);
 
-	if (chip->options & NAND_BUSWIDTH_16)
-		stm32_fmc2_nfc_set_buswidth_16(nfc, true);
+	stm32_fmc2_nfc_setup(chip);
 
 	return 0;
 }
@@ -1737,6 +1748,18 @@ static const struct nand_controller_ops stm32_fmc2_nfc_controller_ops = {
 	.exec_op = stm32_fmc2_nfc_exec_op,
 	.setup_interface = stm32_fmc2_nfc_setup_interface,
 };
+
+static void stm32_fmc2_nfc_wp_enable(struct stm32_fmc2_nand *nand)
+{
+	if (nand->wp_gpio)
+		gpiod_set_value(nand->wp_gpio, 1);
+}
+
+static void stm32_fmc2_nfc_wp_disable(struct stm32_fmc2_nand *nand)
+{
+	if (nand->wp_gpio)
+		gpiod_set_value(nand->wp_gpio, 0);
+}
 
 static int stm32_fmc2_nfc_parse_child(struct stm32_fmc2_nfc *nfc,
 				      struct device_node *dn)
@@ -1762,7 +1785,7 @@ static int stm32_fmc2_nfc_parse_child(struct stm32_fmc2_nfc *nfc,
 			return ret;
 		}
 
-		if (cs > FMC2_MAX_CE) {
+		if (cs >= FMC2_MAX_CE) {
 			dev_err(nfc->dev, "invalid reg value: %d\n", cs);
 			return -EINVAL;
 		}
@@ -1774,6 +1797,18 @@ static int stm32_fmc2_nfc_parse_child(struct stm32_fmc2_nfc *nfc,
 
 		nfc->cs_assigned |= BIT(cs);
 		nand->cs_used[i] = cs;
+	}
+
+	nand->wp_gpio = devm_gpiod_get_from_of_node(nfc->dev, dn,
+						    "wp-gpios", 0,
+						    GPIOD_OUT_HIGH, "wp");
+	if (IS_ERR(nand->wp_gpio)) {
+		ret = PTR_ERR(nand->wp_gpio);
+		if (ret != -ENOENT)
+			return dev_err_probe(nfc->dev, ret,
+					     "failed to request WP GPIO\n");
+
+		nand->wp_gpio = NULL;
 	}
 
 	nand_set_flash_node(&nand->chip, dn);
@@ -1890,15 +1925,11 @@ static int stm32_fmc2_nfc_probe(struct platform_device *pdev)
 
 		nfc->data_phys_addr[chip_cs] = res->start;
 
-		res = platform_get_resource(pdev, IORESOURCE_MEM,
-					    mem_region + 1);
-		nfc->cmd_base[chip_cs] = devm_ioremap_resource(dev, res);
+		nfc->cmd_base[chip_cs] = devm_platform_ioremap_resource(pdev, mem_region + 1);
 		if (IS_ERR(nfc->cmd_base[chip_cs]))
 			return PTR_ERR(nfc->cmd_base[chip_cs]);
 
-		res = platform_get_resource(pdev, IORESOURCE_MEM,
-					    mem_region + 2);
-		nfc->addr_base[chip_cs] = devm_ioremap_resource(dev, res);
+		nfc->addr_base[chip_cs] = devm_platform_ioremap_resource(pdev, mem_region + 2);
 		if (IS_ERR(nfc->addr_base[chip_cs]))
 			return PTR_ERR(nfc->addr_base[chip_cs]);
 	}
@@ -1951,15 +1982,12 @@ static int stm32_fmc2_nfc_probe(struct platform_device *pdev)
 	chip->options |= NAND_BUSWIDTH_AUTO | NAND_NO_SUBPAGE_WRITE |
 			 NAND_USES_DMA;
 
-	/* Default ECC settings */
-	chip->ecc.mode = NAND_ECC_HW;
-	chip->ecc.size = FMC2_ECC_STEP_SIZE;
-	chip->ecc.strength = FMC2_ECC_BCH8;
+	stm32_fmc2_nfc_wp_disable(nand);
 
 	/* Scan to find existence of the device */
 	ret = nand_scan(chip, nand->ncs);
 	if (ret)
-		goto err_release_dma;
+		goto err_wp_enable;
 
 	ret = mtd_device_register(mtd, NULL, 0);
 	if (ret)
@@ -1971,6 +1999,9 @@ static int stm32_fmc2_nfc_probe(struct platform_device *pdev)
 
 err_nand_cleanup:
 	nand_cleanup(chip);
+
+err_wp_enable:
+	stm32_fmc2_nfc_wp_enable(nand);
 
 err_release_dma:
 	if (nfc->dma_ecc_ch)
@@ -2012,14 +2043,19 @@ static int stm32_fmc2_nfc_remove(struct platform_device *pdev)
 
 	clk_disable_unprepare(nfc->clk);
 
+	stm32_fmc2_nfc_wp_enable(nand);
+
 	return 0;
 }
 
 static int __maybe_unused stm32_fmc2_nfc_suspend(struct device *dev)
 {
 	struct stm32_fmc2_nfc *nfc = dev_get_drvdata(dev);
+	struct stm32_fmc2_nand *nand = &nfc->nand;
 
 	clk_disable_unprepare(nfc->clk);
+
+	stm32_fmc2_nfc_wp_enable(nand);
 
 	pinctrl_pm_select_sleep_state(dev);
 
@@ -2041,6 +2077,8 @@ static int __maybe_unused stm32_fmc2_nfc_resume(struct device *dev)
 	}
 
 	stm32_fmc2_nfc_init(nfc);
+
+	stm32_fmc2_nfc_wp_disable(nand);
 
 	for (chip_cs = 0; chip_cs < FMC2_MAX_CE; chip_cs++) {
 		if (!(nfc->cs_assigned & BIT(chip_cs)))

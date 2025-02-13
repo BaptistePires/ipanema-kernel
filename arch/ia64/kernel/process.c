@@ -19,6 +19,7 @@
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/personality.h>
+#include <linux/reboot.h>
 #include <linux/sched.h>
 #include <linux/sched/debug.h>
 #include <linux/sched/hotplug.h>
@@ -32,7 +33,7 @@
 #include <linux/delay.h>
 #include <linux/kdebug.h>
 #include <linux/utsname.h>
-#include <linux/tracehook.h>
+#include <linux/resume_user_mode.h>
 #include <linux/rcupdate.h>
 
 #include <asm/cpu.h>
@@ -50,10 +51,6 @@
 #include <asm/xtp.h>
 
 #include "entry.h"
-
-#ifdef CONFIG_PERFMON
-# include <asm/perfmon.h>
-#endif
 
 #include "sigframe.h"
 
@@ -174,24 +171,16 @@ do_notify_resume_user(sigset_t *unused, struct sigscratch *scr, long in_syscall)
 		return;
 	}
 
-#ifdef CONFIG_PERFMON
-	if (current->thread.pfm_needs_checking)
-		/*
-		 * Note: pfm_handle_work() allow us to call it with interrupts
-		 * disabled, and may enable interrupts within the function.
-		 */
-		pfm_handle_work();
-#endif
-
 	/* deal with pending signal delivery */
-	if (test_thread_flag(TIF_SIGPENDING)) {
+	if (test_thread_flag(TIF_SIGPENDING) ||
+	    test_thread_flag(TIF_NOTIFY_SIGNAL)) {
 		local_irq_enable();	/* force interrupt enable */
 		ia64_do_signal(scr, in_syscall);
 	}
 
-	if (test_and_clear_thread_flag(TIF_NOTIFY_RESUME)) {
+	if (test_thread_flag(TIF_NOTIFY_RESUME)) {
 		local_irq_enable();	/* force interrupt enable */
-		tracehook_notify_resume(&scr->pt);
+		resume_user_mode_work(&scr->pt);
 	}
 
 	/* copy user rbs to kernel rbs */
@@ -252,7 +241,7 @@ void arch_cpu_idle(void)
 	if (mark_idle)
 		(*mark_idle)(1);
 
-	safe_halt();
+	raw_safe_halt();
 
 	if (mark_idle)
 		(*mark_idle)(0);
@@ -264,41 +253,15 @@ void arch_cpu_idle(void)
 void
 ia64_save_extra (struct task_struct *task)
 {
-#ifdef CONFIG_PERFMON
-	unsigned long info;
-#endif
-
 	if ((task->thread.flags & IA64_THREAD_DBG_VALID) != 0)
 		ia64_save_debug_regs(&task->thread.dbr[0]);
-
-#ifdef CONFIG_PERFMON
-	if ((task->thread.flags & IA64_THREAD_PM_VALID) != 0)
-		pfm_save_regs(task);
-
-	info = __this_cpu_read(pfm_syst_info);
-	if (info & PFM_CPUINFO_SYST_WIDE)
-		pfm_syst_wide_update_task(task, info, 0);
-#endif
 }
 
 void
 ia64_load_extra (struct task_struct *task)
 {
-#ifdef CONFIG_PERFMON
-	unsigned long info;
-#endif
-
 	if ((task->thread.flags & IA64_THREAD_DBG_VALID) != 0)
 		ia64_load_debug_regs(&task->thread.dbr[0]);
-
-#ifdef CONFIG_PERFMON
-	if ((task->thread.flags & IA64_THREAD_PM_VALID) != 0)
-		pfm_load_regs(task);
-
-	info = __this_cpu_read(pfm_syst_info);
-	if (info & PFM_CPUINFO_SYST_WIDE)
-		pfm_syst_wide_update_task(task, info, 1);
-#endif
 }
 
 /*
@@ -310,7 +273,7 @@ ia64_load_extra (struct task_struct *task)
  *
  *	<clone syscall>	        <some kernel call frames>
  *	sys_clone		   :
- *	_do_fork		_do_fork
+ *	kernel_clone		kernel_clone
  *	copy_thread		copy_thread
  *
  * This means that the stack layout is as follows:
@@ -333,9 +296,12 @@ ia64_load_extra (struct task_struct *task)
  * so there is nothing to worry about.
  */
 int
-copy_thread(unsigned long clone_flags, unsigned long user_stack_base,
-	    unsigned long user_stack_size, struct task_struct *p, unsigned long tls)
+copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 {
+	unsigned long clone_flags = args->flags;
+	unsigned long user_stack_base = args->stack;
+	unsigned long user_stack_size = args->stack_size;
+	unsigned long tls = args->tls;
 	extern char ia64_ret_from_clone;
 	struct switch_stack *child_stack, *stack;
 	unsigned long rbs, child_rbs, rbs_size;
@@ -376,14 +342,14 @@ copy_thread(unsigned long clone_flags, unsigned long user_stack_base,
 
 	ia64_drop_fpu(p);	/* don't pick up stale state from a CPU's fph */
 
-	if (unlikely(p->flags & PF_KTHREAD)) {
-		if (unlikely(!user_stack_base)) {
+	if (unlikely(args->fn)) {
+		if (unlikely(args->idle)) {
 			/* fork_idle() called us */
 			return 0;
 		}
 		memset(child_stack, 0, sizeof(*child_ptregs) + sizeof(*child_stack));
-		child_stack->r4 = user_stack_base;	/* payload */
-		child_stack->r5 = user_stack_size;	/* argument */
+		child_stack->r4 = (unsigned long) args->fn;
+		child_stack->r5 = (unsigned long) args->fn_arg;
 		/*
 		 * Preserve PSR bits, except for bits 32-34 and 37-45,
 		 * which we can't read.
@@ -432,11 +398,6 @@ copy_thread(unsigned long clone_flags, unsigned long user_stack_base,
 	 */
 	child_ptregs->cr_ipsr = ((child_ptregs->cr_ipsr | IA64_PSR_BITS_TO_SET)
 				 & ~(IA64_PSR_BITS_TO_CLEAR | IA64_PSR_PP | IA64_PSR_UP));
-
-#ifdef CONFIG_PERFMON
-	if (current->thread.pfm_context)
-		pfm_inherit(p, child_ptregs);
-#endif
 	return retval;
 }
 
@@ -455,7 +416,7 @@ asmlinkage long ia64_clone(unsigned long clone_flags, unsigned long stack_start,
 		.tls		= tls,
 	};
 
-	return _do_fork(&args);
+	return kernel_clone(&args);
 }
 
 static void
@@ -531,7 +492,7 @@ do_copy_task_regs (struct task_struct *task, struct unw_frame_info *info, void *
 	unw_get_ar(info, UNW_AR_SSD, &dst[56]);
 }
 
-void
+static void
 do_copy_regs (struct unw_frame_info *info, void *arg)
 {
 	do_copy_task_regs(current, info, arg);
@@ -563,26 +524,14 @@ exit_thread (struct task_struct *tsk)
 {
 
 	ia64_drop_fpu(tsk);
-#ifdef CONFIG_PERFMON
-       /* if needed, stop monitoring and flush state to perfmon context */
-	if (tsk->thread.pfm_context)
-		pfm_exit_thread(tsk);
-
-	/* free debug register resources */
-	if (tsk->thread.flags & IA64_THREAD_DBG_VALID)
-		pfm_release_debug_registers(tsk);
-#endif
 }
 
 unsigned long
-get_wchan (struct task_struct *p)
+__get_wchan (struct task_struct *p)
 {
 	struct unw_frame_info info;
 	unsigned long ip;
 	int count = 0;
-
-	if (!p || p == current || p->state == TASK_RUNNING)
-		return 0;
 
 	/*
 	 * Note: p may not be a blocked task (it could be current or
@@ -594,7 +543,7 @@ get_wchan (struct task_struct *p)
 	 */
 	unw_init_from_blocked_task(&info, p);
 	do {
-		if (p->state == TASK_RUNNING)
+		if (task_is_running(p))
 			return 0;
 		if (unw_unwind(&info) < 0)
 			return 0;
@@ -654,8 +603,7 @@ machine_halt (void)
 void
 machine_power_off (void)
 {
-	if (pm_power_off)
-		pm_power_off();
+	do_kernel_power_off();
 	machine_halt();
 }
 

@@ -401,12 +401,8 @@ static const struct v4l2_file_operations vip_fops = {
 static int vidioc_querycap(struct file *file, void *priv,
 			   struct v4l2_capability *cap)
 {
-	struct sta2x11_vip *vip = video_drvdata(file);
-
 	strscpy(cap->driver, KBUILD_MODNAME, sizeof(cap->driver));
 	strscpy(cap->card, KBUILD_MODNAME, sizeof(cap->card));
-	snprintf(cap->bus_info, sizeof(cap->bus_info), "PCI:%s",
-		 pci_name(vip->pdev));
 	return 0;
 }
 
@@ -1101,12 +1097,11 @@ static int sta2x11_vip_init_one(struct pci_dev *pdev,
 vunreg:
 	video_set_drvdata(&vip->video_dev, NULL);
 vrelease:
-	video_unregister_device(&vip->video_dev);
+	vb2_video_unregister_device(&vip->video_dev);
 	free_irq(pdev->irq, vip);
 release_buf:
 	pci_disable_msi(pdev);
 unmap:
-	vb2_queue_release(&vip->vb_vidq);
 	pci_iounmap(pdev, vip->iomem);
 release:
 	pci_release_regions(pdev);
@@ -1146,10 +1141,9 @@ static void sta2x11_vip_remove_one(struct pci_dev *pdev)
 	sta2x11_vip_clear_register(vip);
 
 	video_set_drvdata(&vip->video_dev, NULL);
-	video_unregister_device(&vip->video_dev);
+	vb2_video_unregister_device(&vip->video_dev);
 	free_irq(pdev->irq, vip);
 	pci_disable_msi(pdev);
-	vb2_queue_release(&vip->vb_vidq);
 	pci_iounmap(pdev, vip->iomem);
 	pci_release_regions(pdev);
 
@@ -1271,6 +1265,5 @@ late_initcall_sync(sta2x11_vip_init_module);
 MODULE_DESCRIPTION("STA2X11 Video Input Port driver");
 MODULE_AUTHOR("Wind River");
 MODULE_LICENSE("GPL v2");
-MODULE_SUPPORTED_DEVICE("sta2x11 video input");
 MODULE_VERSION(DRV_VERSION);
 MODULE_DEVICE_TABLE(pci, sta2x11_vip_pci_tbl);

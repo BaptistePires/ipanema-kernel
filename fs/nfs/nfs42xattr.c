@@ -67,7 +67,6 @@ struct nfs4_xattr_bucket {
 
 struct nfs4_xattr_cache {
 	struct kref ref;
-	spinlock_t hash_lock;	/* protects hashtable and lru */
 	struct nfs4_xattr_bucket buckets[NFS4_XATTR_HASH_SIZE];
 	struct list_head lru;
 	struct list_head dispose;
@@ -169,7 +168,7 @@ nfs4_xattr_entry_lru_del(struct nfs4_xattr_entry *entry)
  *	   make it easier to copy the value after an RPC, even if
  *	   the value will not be passed up to application (e.g.
  *	   for a 'query' getxattr with NULL buffer).
- * @len:   Length of the value. Can be 0 for zero-length attribues.
+ * @len:   Length of the value. Can be 0 for zero-length attributes.
  *         @value and @pages will be NULL if @len is 0.
  */
 static struct nfs4_xattr_entry *
@@ -200,7 +199,7 @@ nfs4_xattr_alloc_entry(const char *name, const void *value,
 		flags = NFS4_XATTR_ENTRY_EXTVAL;
 	}
 
-	buf = kmalloc(alloclen, GFP_KERNEL_ACCOUNT | GFP_NOFS);
+	buf = kmalloc(alloclen, GFP_KERNEL);
 	if (buf == NULL)
 		return NULL;
 	entry = (struct nfs4_xattr_entry *)buf;
@@ -214,7 +213,7 @@ nfs4_xattr_alloc_entry(const char *name, const void *value,
 
 
 	if (flags & NFS4_XATTR_ENTRY_EXTVAL) {
-		valp = kvmalloc(len, GFP_KERNEL_ACCOUNT | GFP_NOFS);
+		valp = kvmalloc(len, GFP_KERNEL);
 		if (valp == NULL) {
 			kfree(buf);
 			return NULL;
@@ -290,8 +289,7 @@ nfs4_xattr_alloc_cache(void)
 {
 	struct nfs4_xattr_cache *cache;
 
-	cache = kmem_cache_alloc(nfs4_xattr_cache_cachep,
-	    GFP_KERNEL_ACCOUNT | GFP_NOFS);
+	cache = kmem_cache_alloc(nfs4_xattr_cache_cachep, GFP_KERNEL);
 	if (cache == NULL)
 		return NULL;
 
@@ -882,7 +880,7 @@ nfs4_xattr_cache_count(struct shrinker *shrink, struct shrink_control *sc)
 {
 	unsigned long count;
 
-	count = list_lru_count(&nfs4_xattr_cache_lru);
+	count = list_lru_shrink_count(&nfs4_xattr_cache_lru, sc);
 	return vfs_pressure_ratio(count);
 }
 
@@ -976,7 +974,7 @@ nfs4_xattr_entry_count(struct shrinker *shrink, struct shrink_control *sc)
 	lru = (shrink == &nfs4_xattr_large_entry_shrinker) ?
 	    &nfs4_xattr_large_entry_lru : &nfs4_xattr_entry_lru;
 
-	count = list_lru_count(lru);
+	count = list_lru_shrink_count(lru, sc);
 	return vfs_pressure_ratio(count);
 }
 
@@ -999,7 +997,7 @@ int __init nfs4_xattr_cache_init(void)
 
 	nfs4_xattr_cache_cachep = kmem_cache_create("nfs4_xattr_cache_cache",
 	    sizeof(struct nfs4_xattr_cache), 0,
-	    (SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD|SLAB_ACCOUNT),
+	    (SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD),
 	    nfs4_xattr_cache_init_once);
 	if (nfs4_xattr_cache_cachep == NULL)
 		return -ENOMEM;
@@ -1019,15 +1017,16 @@ int __init nfs4_xattr_cache_init(void)
 	if (ret)
 		goto out2;
 
-	ret = register_shrinker(&nfs4_xattr_cache_shrinker);
+	ret = register_shrinker(&nfs4_xattr_cache_shrinker, "nfs-xattr_cache");
 	if (ret)
 		goto out1;
 
-	ret = register_shrinker(&nfs4_xattr_entry_shrinker);
+	ret = register_shrinker(&nfs4_xattr_entry_shrinker, "nfs-xattr_entry");
 	if (ret)
 		goto out;
 
-	ret = register_shrinker(&nfs4_xattr_large_entry_shrinker);
+	ret = register_shrinker(&nfs4_xattr_large_entry_shrinker,
+				"nfs-xattr_large_entry");
 	if (!ret)
 		return 0;
 
@@ -1048,8 +1047,10 @@ out4:
 
 void nfs4_xattr_cache_exit(void)
 {
+	unregister_shrinker(&nfs4_xattr_large_entry_shrinker);
 	unregister_shrinker(&nfs4_xattr_entry_shrinker);
 	unregister_shrinker(&nfs4_xattr_cache_shrinker);
+	list_lru_destroy(&nfs4_xattr_large_entry_lru);
 	list_lru_destroy(&nfs4_xattr_entry_lru);
 	list_lru_destroy(&nfs4_xattr_cache_lru);
 	kmem_cache_destroy(nfs4_xattr_cache_cachep);

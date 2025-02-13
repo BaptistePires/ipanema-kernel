@@ -13,10 +13,12 @@
 #include <linux/of_platform.h>
 #include <linux/pm_runtime.h>
 
+#include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_fourcc.h>
+#include <drm/drm_framebuffer.h>
 #include <drm/drm_panel.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_vblank.h>
@@ -272,8 +274,10 @@ static int vc4_txp_connector_atomic_check(struct drm_connector *conn,
 }
 
 static void vc4_txp_connector_atomic_commit(struct drm_connector *conn,
-					struct drm_connector_state *conn_state)
+					struct drm_atomic_state *state)
 {
+	struct drm_connector_state *conn_state = drm_atomic_get_new_connector_state(state,
+										    conn);
 	struct vc4_txp *txp = connector_to_vc4_txp(conn);
 	struct drm_gem_cma_object *gem;
 	struct drm_display_mode *mode;
@@ -295,12 +299,18 @@ static void vc4_txp_connector_atomic_commit(struct drm_connector *conn,
 	if (WARN_ON(i == ARRAY_SIZE(drm_fmts)))
 		return;
 
-	ctrl = TXP_GO | TXP_VSTART_AT_EOF | TXP_EI |
+	ctrl = TXP_GO | TXP_EI |
 	       VC4_SET_FIELD(0xf, TXP_BYTE_ENABLE) |
 	       VC4_SET_FIELD(txp_fmts[i], TXP_FORMAT);
 
 	if (fb->format->has_alpha)
 		ctrl |= TXP_ALPHA_ENABLE;
+	else
+		/*
+		 * If TXP_ALPHA_ENABLE isn't set and TXP_ALPHA_INVERT is, the
+		 * hardware will force the output padding to be 0xff.
+		 */
+		ctrl |= TXP_ALPHA_INVERT;
 
 	gem = drm_fb_cma_get_gem_obj(fb, 0);
 	TXP_WRITE(TXP_DST_PTR, gem->paddr + fb->offsets[0]);
@@ -379,43 +389,42 @@ static const struct drm_crtc_funcs vc4_txp_crtc_funcs = {
 	.reset			= vc4_crtc_reset,
 	.atomic_duplicate_state	= vc4_crtc_duplicate_state,
 	.atomic_destroy_state	= vc4_crtc_destroy_state,
-	.gamma_set		= drm_atomic_helper_legacy_gamma_set,
 	.enable_vblank		= vc4_txp_enable_vblank,
 	.disable_vblank		= vc4_txp_disable_vblank,
 };
 
 static int vc4_txp_atomic_check(struct drm_crtc *crtc,
-				struct drm_crtc_state *state)
+				struct drm_atomic_state *state)
 {
-	struct vc4_crtc_state *vc4_state = to_vc4_crtc_state(state);
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state,
+									  crtc);
 	int ret;
 
 	ret = vc4_hvs_atomic_check(crtc, state);
 	if (ret)
 		return ret;
 
-	state->no_vblank = true;
-	vc4_state->feed_txp = true;
+	crtc_state->no_vblank = true;
 
 	return 0;
 }
 
 static void vc4_txp_atomic_enable(struct drm_crtc *crtc,
-				  struct drm_crtc_state *old_state)
+				  struct drm_atomic_state *state)
 {
 	drm_crtc_vblank_on(crtc);
-	vc4_hvs_atomic_enable(crtc, old_state);
+	vc4_hvs_atomic_enable(crtc, state);
 }
 
 static void vc4_txp_atomic_disable(struct drm_crtc *crtc,
-				   struct drm_crtc_state *old_state)
+				   struct drm_atomic_state *state)
 {
 	struct drm_device *dev = crtc->dev;
 
 	/* Disable vblank irq handling before crtc is disabled. */
 	drm_crtc_vblank_off(crtc);
 
-	vc4_hvs_atomic_disable(crtc, old_state);
+	vc4_hvs_atomic_disable(crtc, state);
 
 	/*
 	 * Make sure we issue a vblank event after disabling the CRTC if
@@ -433,10 +442,10 @@ static void vc4_txp_atomic_disable(struct drm_crtc *crtc,
 
 static const struct drm_crtc_helper_funcs vc4_txp_crtc_helper_funcs = {
 	.atomic_check	= vc4_txp_atomic_check,
+	.atomic_begin	= vc4_hvs_atomic_begin,
 	.atomic_flush	= vc4_hvs_atomic_flush,
 	.atomic_enable	= vc4_txp_atomic_enable,
 	.atomic_disable	= vc4_txp_atomic_disable,
-	.mode_set_nofb	= vc4_hvs_mode_set_nofb,
 };
 
 static irqreturn_t vc4_txp_interrupt(int irq, void *data)
@@ -452,7 +461,8 @@ static irqreturn_t vc4_txp_interrupt(int irq, void *data)
 }
 
 static const struct vc4_crtc_data vc4_txp_crtc_data = {
-	.hvs_channel = 2,
+	.hvs_available_channels = BIT(2),
+	.hvs_output = 2,
 };
 
 static int vc4_txp_bind(struct device *dev, struct device *master, void *data)
@@ -478,6 +488,7 @@ static int vc4_txp_bind(struct device *dev, struct device *master, void *data)
 
 	vc4_crtc->pdev = pdev;
 	vc4_crtc->data = &vc4_txp_crtc_data;
+	vc4_crtc->feeds_txp = true;
 
 	txp->pdev = pdev;
 
@@ -493,7 +504,8 @@ static int vc4_txp_bind(struct device *dev, struct device *master, void *data)
 	ret = drm_writeback_connector_init(drm, &txp->connector,
 					   &vc4_txp_connector_funcs,
 					   &vc4_txp_encoder_helper_funcs,
-					   drm_fmts, ARRAY_SIZE(drm_fmts));
+					   drm_fmts, ARRAY_SIZE(drm_fmts),
+					   0);
 	if (ret)
 		return ret;
 
@@ -503,7 +515,7 @@ static int vc4_txp_bind(struct device *dev, struct device *master, void *data)
 		return ret;
 
 	encoder = &txp->connector.encoder;
-	encoder->possible_crtcs |= drm_crtc_mask(crtc);
+	encoder->possible_crtcs = drm_crtc_mask(crtc);
 
 	ret = devm_request_irq(dev, irq, vc4_txp_interrupt, 0,
 			       dev_name(dev), txp);

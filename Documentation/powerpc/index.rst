@@ -7,6 +7,8 @@ powerpc
 .. toctree::
     :maxdepth: 1
 
+    associativity
+    booting
     bootwrapper
     cpu_families
     cpu_features
@@ -15,6 +17,7 @@ powerpc
     dawr-power9
     dscr
     eeh-pci-error-recovery
+    elf_hwcaps
     elfnote
     firmware-assisted-dump
     hvcs
@@ -32,6 +35,8 @@ powerpc
     ultravisor
     vas-api
     vcpudispatch_stats
+
+    features
 
 .. only::  subproject and html
 

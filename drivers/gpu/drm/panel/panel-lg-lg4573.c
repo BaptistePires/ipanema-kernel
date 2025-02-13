@@ -261,17 +261,17 @@ static int lg4573_probe(struct spi_device *spi)
 	drm_panel_init(&ctx->panel, &spi->dev, &lg4573_drm_funcs,
 		       DRM_MODE_CONNECTOR_DPI);
 
-	return drm_panel_add(&ctx->panel);
+	drm_panel_add(&ctx->panel);
+
+	return 0;
 }
 
-static int lg4573_remove(struct spi_device *spi)
+static void lg4573_remove(struct spi_device *spi)
 {
 	struct lg4573 *ctx = spi_get_drvdata(spi);
 
 	lg4573_display_off(ctx);
 	drm_panel_remove(&ctx->panel);
-
-	return 0;
 }
 
 static const struct of_device_id lg4573_of_match[] = {

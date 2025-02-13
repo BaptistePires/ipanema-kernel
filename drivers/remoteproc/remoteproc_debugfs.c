@@ -33,9 +33,9 @@ static struct dentry *rproc_dbg;
  * enum rproc_coredump_mechanism
  */
 static const char * const rproc_coredump_str[] = {
-	[RPROC_COREDUMP_DEFAULT]	= "default",
-	[RPROC_COREDUMP_INLINE]		= "inline",
 	[RPROC_COREDUMP_DISABLED]	= "disabled",
+	[RPROC_COREDUMP_ENABLED]	= "enabled",
+	[RPROC_COREDUMP_INLINE]		= "inline",
 };
 
 /* Expose the current coredump configuration via debugfs */
@@ -54,20 +54,19 @@ static ssize_t rproc_coredump_read(struct file *filp, char __user *userbuf,
 
 /*
  * By writing to the 'coredump' debugfs entry, we control the behavior of the
- * coredump mechanism dynamically. The default value of this entry is "default".
+ * coredump mechanism dynamically. The default value of this entry is "disabled".
  *
  * The 'coredump' debugfs entry supports these commands:
  *
- * default:	This is the default coredump mechanism. When the remoteproc
- *		crashes the entire coredump will be copied to a separate buffer
- *		and exposed to userspace.
+ * disabled:	By default coredump collection is disabled. Recovery will
+ *		proceed without collecting any dump.
+ *
+ * enabled:	When the remoteproc crashes the entire coredump will be copied
+ *		to a separate buffer and exposed to userspace.
  *
  * inline:	The coredump will not be copied to a separate buffer and the
  *		recovery process will have to wait until data is read by
  *		userspace. But this avoid usage of extra memory.
- *
- * disabled:	This will disable coredump. Recovery will proceed without
- *		collecting any dump.
  */
 static ssize_t rproc_coredump_write(struct file *filp,
 				    const char __user *user_buf, size_t count,
@@ -77,7 +76,7 @@ static ssize_t rproc_coredump_write(struct file *filp,
 	int ret, err = 0;
 	char buf[20];
 
-	if (count > sizeof(buf))
+	if (count < 1 || count > sizeof(buf))
 		return -EINVAL;
 
 	ret = copy_from_user(buf, user_buf, count);
@@ -94,12 +93,12 @@ static ssize_t rproc_coredump_write(struct file *filp,
 		goto out;
 	}
 
-	if (!strncmp(buf, "disable", count)) {
+	if (!strncmp(buf, "disabled", count)) {
 		rproc->dump_conf = RPROC_COREDUMP_DISABLED;
+	} else if (!strncmp(buf, "enabled", count)) {
+		rproc->dump_conf = RPROC_COREDUMP_ENABLED;
 	} else if (!strncmp(buf, "inline", count)) {
 		rproc->dump_conf = RPROC_COREDUMP_INLINE;
-	} else if (!strncmp(buf, "default", count)) {
-		rproc->dump_conf = RPROC_COREDUMP_DEFAULT;
 	} else {
 		dev_err(&rproc->dev, "Invalid coredump configuration\n");
 		err = -EINVAL;
@@ -133,7 +132,7 @@ static ssize_t rproc_trace_read(struct file *filp, char __user *userbuf,
 	char buf[100];
 	int len;
 
-	va = rproc_da_to_va(data->rproc, trace->da, trace->len);
+	va = rproc_da_to_va(data->rproc, trace->da, trace->len, NULL);
 
 	if (!va) {
 		len = scnprintf(buf, sizeof(buf), "Trace %s not available\n",
@@ -387,16 +386,8 @@ void rproc_remove_trace_file(struct dentry *tfile)
 struct dentry *rproc_create_trace_file(const char *name, struct rproc *rproc,
 				       struct rproc_debug_trace *trace)
 {
-	struct dentry *tfile;
-
-	tfile = debugfs_create_file(name, 0400, rproc->dbg_dir, trace,
+	return debugfs_create_file(name, 0400, rproc->dbg_dir, trace,
 				    &trace_rproc_ops);
-	if (!tfile) {
-		dev_err(&rproc->dev, "failed to create debugfs trace entry\n");
-		return NULL;
-	}
-
-	return tfile;
 }
 
 void rproc_delete_debug_dir(struct rproc *rproc)
@@ -412,8 +403,6 @@ void rproc_create_debug_dir(struct rproc *rproc)
 		return;
 
 	rproc->dbg_dir = debugfs_create_dir(dev_name(dev), rproc_dbg);
-	if (!rproc->dbg_dir)
-		return;
 
 	debugfs_create_file("name", 0400, rproc->dbg_dir,
 			    rproc, &rproc_name_ops);
@@ -431,11 +420,8 @@ void rproc_create_debug_dir(struct rproc *rproc)
 
 void __init rproc_init_debugfs(void)
 {
-	if (debugfs_initialized()) {
+	if (debugfs_initialized())
 		rproc_dbg = debugfs_create_dir(KBUILD_MODNAME, NULL);
-		if (!rproc_dbg)
-			pr_err("can't create debugfs dir\n");
-	}
 }
 
 void __exit rproc_exit_debugfs(void)
