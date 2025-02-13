@@ -5437,60 +5437,6 @@ __setup("resched_latency_warn_ms=", setup_resched_latency_warn_ms);
 static inline u64 cpu_resched_latency(struct rq *rq) { return 0; }
 #endif /* CONFIG_SCHED_DEBUG */
 
-/*
- * This code was duplicated from arch/x86/kernel/cpu/aperfmperf.c on purpose:
- * 1) We cannot sleep/wait here.
- * 2) We might not want to interfere with the existing behavior.
- *
- */
-
-struct aperfmperf_sample {
-	unsigned int khz;
-	u64 aperf;
-	u64 mperf;
-};
-
-static DEFINE_PER_CPU(struct aperfmperf_sample, samples);
-
-static void aperfmperf_snapshot_khz(void *dummy)
-{
-	u64 aperf, aperf_delta;
-	u64 mperf, mperf_delta;
-	struct aperfmperf_sample *s = this_cpu_ptr(&samples);
-	unsigned long flags;
-
-	local_irq_save(flags);
-	rdmsrl(MSR_IA32_APERF, aperf);
-	rdmsrl(MSR_IA32_MPERF, mperf);
-	local_irq_restore(flags);
-
-	aperf_delta = aperf - s->aperf;
-	mperf_delta = mperf - s->mperf;
-
-	/*
-	 * There is no architectural guarantee that MPERF
-	 * increments faster than we can read it.
-	 */
-	if (mperf_delta == 0)
-		return;
-
-	s->aperf = aperf;
-	s->mperf = mperf;
-	s->khz = div64_u64((cpu_khz * aperf_delta), mperf_delta);
-}
-
-static unsigned int my_aperfmperf_get_khz(int cpu)
-{
-	if (!cpu_khz)
-		return 0;
-
-	if (!static_cpu_has(X86_FEATURE_APERFMPERF))
-		return 0;
-
-	aperfmperf_snapshot_khz(NULL);
-
-	return per_cpu(samples.khz, cpu);
-}
 
 /*
  * This function gets called by the timer code, with HZ frequency.
@@ -7005,6 +6951,7 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 	 */
 	if (prev_class == &ipanema_sched_class)
 		goto out_class_choice;
+
 	if (dl_prio(prio)) {
 		if (!dl_prio(p->normal_prio) ||
 		    (pi_task && dl_prio(pi_task->prio) &&
@@ -7026,6 +6973,7 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 			p->rt.timeout = 0;
 	}
 
+out_class_choice:
 	__setscheduler_prio(p, prio);
 
 	if (queued)

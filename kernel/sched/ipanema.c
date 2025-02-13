@@ -32,19 +32,19 @@ EXPORT_SYMBOL(get_ipanema_current);
 
 void ipanema_lock_core(unsigned int id)
 {
-	raw_spin_lock(&cpu_rq(id)->lock);
+	raw_spin_lock(&cpu_rq(id)->__lock);
 }
 EXPORT_SYMBOL(ipanema_lock_core);
 
 int ipanema_trylock_core(unsigned int id)
 {
-	return raw_spin_trylock(&cpu_rq(id)->lock);
+	return raw_spin_trylock(&cpu_rq(id)->__lock);
 }
 EXPORT_SYMBOL(ipanema_trylock_core);
 
 void ipanema_unlock_core(unsigned int id)
 {
-	raw_spin_unlock(&cpu_rq(id)->lock);
+	raw_spin_unlock(&cpu_rq(id)->__lock);
 }
 EXPORT_SYMBOL(ipanema_unlock_core);
 
@@ -193,7 +193,7 @@ void ipanema_new_place(struct process_event *e)
 	struct task_struct *p = e->target;
 	struct ipanema_policy *policy;
 
-	lockdep_assert_held(&task_rq(p)->lock);
+	lockdep_assert_held(&task_rq(p)->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -226,7 +226,7 @@ void ipanema_tick(struct process_event *e)
 	 * Make sure the rq lock is held, because we will need to call
 	 * resched_curr() to schedule another thread.
 	 */
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&rq->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -246,7 +246,7 @@ void ipanema_yield(struct process_event *e)
 	 * Make sure the rq lock is held, because we will need to call
 	 * resched_curr() to schedule another thread.
 	 */
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&rq->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -266,7 +266,7 @@ void ipanema_block(struct process_event *e)
 	 * Make sure the rq lock is held, because we will need to call
 	 * resched_curr() to schedule another thread.
 	 */
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&rq->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -296,7 +296,7 @@ void ipanema_unblock_place(struct process_event *e)
 	struct task_struct *p = e->target;
 	struct ipanema_policy *policy;
 
-	lockdep_assert_held(&task_rq(p)->lock);
+	lockdep_assert_held(&task_rq(p)->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -327,7 +327,7 @@ void ipanema_terminate(struct process_event *e)
 	struct rq *rq = task_rq(p);
 	struct ipanema_policy *policy;
 
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&rq->__lock);
 
 	policy = ipanema_task_policy(p);
 
@@ -351,7 +351,7 @@ void ipanema_schedule(struct ipanema_policy *policy, unsigned int core)
 	 * We *must* hold the rq lock here, otherwise we can make a ready task
 	 * running while another thread is stealing it.
 	 */
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&rq->__lock);
 
 	WARN(!policy->routines->schedule,
 	     "%s is NULL in policy %s\n", __func__, policy->name);
@@ -369,18 +369,18 @@ void ipanema_newly_idle(struct ipanema_policy *policy, unsigned int core,
 	     "%s is NULL in policy %s\n", __func__, policy->name);
 
 	/*
-	 * When newly_idle() is called by schedule(), the rq->lock is
-	 * held. However, the handler may want to lock multiple rq->lock
+	 * When newly_idle() is called by schedule(), the rq->__lock is
+	 * held. However, the handler may want to lock multiple rq->__lock
 	 * (idle balancing for example). To allow this, we unpin and
-	 * unlock rq->lock before. We will put everything back to normal
+	 * unlock rq->__lock before. We will put everything back to normal
 	 * upon returning from the handler.
 	 */
 	rq_unpin_lock(rq, rf);
-	raw_spin_unlock(&rq->lock);
+	raw_spin_unlock(&rq->__lock);
 
 	policy->routines->newly_idle(policy, &e);
 
-	raw_spin_lock(&rq->lock);
+	raw_spin_lock(&rq->__lock);
 	rq_repin_lock(rq, rf);
 }
 
@@ -540,7 +540,7 @@ static void change_rq(struct task_struct *p, enum ipanema_state next_state,
 	prev_state = ipanema_task_state(p);
 
 	if (prev_rq) {
-		lockdep_assert_held(&task_rq(p)->lock);
+		lockdep_assert_held(&task_rq(p)->__lock);
 		p = ipanema_remove_task(prev_rq, p);
 		prev_rq->nr_tasks--;
 	}
@@ -551,7 +551,7 @@ static void change_rq(struct task_struct *p, enum ipanema_state next_state,
 	if (next_rq) {
 		next_cpu = next_rq->cpu;
 		next_state = next_rq->state;
-		lockdep_assert_held(&cpu_rq(next_cpu)->lock);
+		lockdep_assert_held(&cpu_rq(next_cpu)->__lock);
 		if (ipanema_add_task(next_rq, p))
 			pr_err("[ERR] %s(pid=%d, cpu=%u) failed. Gonna crash soon...\n",
 			       __func__, p->pid, next_cpu);
@@ -1367,7 +1367,7 @@ static void switched_to_ipanema(struct rq *rq, struct task_struct *p)
 		 * We can safely call resched_curr() here, because the rq lock
 		 * is held.
 		 */
-		lockdep_assert_held(&rq->lock);
+		lockdep_assert_held(&rq->__lock);
 		resched_curr(rq);
 	}
 }
