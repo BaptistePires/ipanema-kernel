@@ -475,7 +475,7 @@ static void check_ipanema_transition(struct task_struct *p,
 				     unsigned int next_cpu)
 {
 	enum ipanema_state prev_state = p->ipanema.state;
-	unsigned int prev_cpu = p->cpu;
+	unsigned int prev_cpu = task_cpu(p);
 
 	switch (prev_state) {
 	case IPANEMA_NOT_QUEUED:
@@ -803,7 +803,7 @@ static void enqueue_task_ipanema(struct rq *rq,
 		goto end;
 
 	pr_warn("[WARN] Uncaught enqueue, CONTEXT: p=[pid=%d, cpu=%d, state=%ld, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
-		       p->pid, p->cpu, READ_ONCE(p->__state), p->on_cpu, p->on_rq,
+		       p->pid, task_cpu(p), READ_ONCE(p->__state), p->on_cpu, p->on_rq,
 		       ipanema_state_to_str(ipanema_task_state(p)),
 		       rq->cpu, rq, flags);
 
@@ -938,7 +938,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 		goto end;
 
 	pr_warn("[WARN] Uncaught dequeue, CONTEXT: p=[pid=%d, cpu=%d, state=%ld, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
-		p->pid, p->cpu, READ_ONCE(p->__state), p->on_cpu, p->on_rq,
+		p->pid, task_cpu(p), READ_ONCE(p->__state), p->on_cpu, p->on_rq,
 		ipanema_state_to_str(ipanema_task_state(p)),
 		rq->cpu, rq, flags);
 
@@ -1098,8 +1098,8 @@ static void put_prev_task_ipanema(struct rq *rq,
 	 * because the task will keep the cpu in its new sched_class.
 	 */
 	if (!prev->ipanema.policy) {
-		if (per_cpu(ipanema_current, prev->cpu) == prev)
-			per_cpu(ipanema_current, prev->cpu) = NULL;
+		if (per_cpu(ipanema_current, task_cpu(prev)) == prev)
+			per_cpu(ipanema_current, task_cpu(prev)) = NULL;
 		return;
 	}
 
@@ -1170,7 +1170,7 @@ static int select_task_rq_ipanema(struct task_struct *p,
 				  int wake_flags)
 {
 	struct process_event e = { .target = p, .cpu = smp_processor_id() };
-	int ret = p->cpu;
+	int ret = task_cpu(p);
 
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d]\n",
@@ -1198,7 +1198,7 @@ static int select_task_rq_ipanema(struct task_struct *p,
 			pr_warn("[WARN] %s: new_prepare failed (pid=%d, policy=%llu), reverting to p->cpu\n",
 				__func__, p->pid,
 				ipanema_task_policy(p)->id);
-			ret = p->cpu;
+			ret = task_cpu(p);
 		}
 	} else if (READ_ONCE(p->__state) == TASK_WAKING) {
 		ret = ipanema_unblock_prepare(&e);
