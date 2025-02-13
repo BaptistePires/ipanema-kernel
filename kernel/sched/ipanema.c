@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/kref.h>
 #include <trace/events/sched.h>
+#include <linux/sched/cputime.h>
 
 LIST_HEAD(ipanema_policies);
 s64 num_ipanema_policies;
@@ -828,8 +829,8 @@ static void update_curr_ipanema(struct rq *rq)
 	if (unlikely((s64)delta_exec <= 0))
 		return;
 
-	schedstat_set(curr->se.statistics.exec_max,
-		      max(curr->se.statistics.exec_max, delta_exec));
+	schedstat_set(curr->stats.exec_max,
+		      max(curr->stats.exec_max, delta_exec));
 
 	curr->se.sum_exec_runtime += delta_exec;
 	account_group_exec_runtime(curr, delta_exec);
