@@ -845,7 +845,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 {
 	int state;
 	struct process_event e = { .target = p, .cpu = smp_processor_id() };
-	
+
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d, rq=%d]\n",
 			__func__, p->pid, rq->cpu);
@@ -967,8 +967,7 @@ static void yield_task_ipanema(struct rq *rq)
 }
 
 static bool yield_to_task_ipanema(struct rq *rq,
-				  struct task_struct *p,
-				  bool preempt)
+				  struct task_struct *p)
 {
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d, rq=%d]\n",
@@ -1074,6 +1073,11 @@ end:
 	return result;
 }
 
+static struct task_struct *__pick_next_task_ipanema(struct rq *rq)
+{
+	return pick_next_task_ipanema(rq, NULL, NULL);
+}
+
 static void put_prev_task_ipanema(struct rq *rq,
 				  struct task_struct *prev)
 {
@@ -1157,6 +1161,13 @@ static void put_prev_task_ipanema(struct rq *rq,
 }
 
 #ifdef CONFIG_SMP
+
+static struct task_struct *pick_task_ipanema(struct rq *rq)
+{
+	pr_info("pick_task_ipanema not implemented\n");
+	return NULL;
+}
+
 static int balance_ipanema(struct rq *rq, struct task_struct *prev,
 			   struct rq_flags *rf)
 {
@@ -1167,7 +1178,6 @@ static int balance_ipanema(struct rq *rq, struct task_struct *prev,
 
 static int select_task_rq_ipanema(struct task_struct *p,
 				  int prev_cpu,
-				  int sd_flag,
 				  int wake_flags)
 {
 	struct process_event e = { .target = p, .cpu = smp_processor_id() };
@@ -1270,7 +1280,7 @@ static void task_dead_ipanema(struct task_struct *p)
 }
 #endif
 
-static void set_next_task_ipanema(struct rq *rq, struct task_struct *p)
+static void set_next_task_ipanema(struct rq *rq, struct task_struct *p, bool first)
 {
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [rq=%d, pid=%d]\n",
@@ -1400,8 +1410,7 @@ void run_rebalance_domains(struct softirq_action *h)
 	ipanema_balancing_select();
 }
 
-const struct sched_class ipanema_sched_class = {
-	.next			= &idle_sched_class,
+DEFINE_SCHED_CLASS(ipanema) = {
 	.enqueue_task		= enqueue_task_ipanema,
 	.dequeue_task		= dequeue_task_ipanema,
 	.yield_task		= yield_task_ipanema,
@@ -1409,11 +1418,13 @@ const struct sched_class ipanema_sched_class = {
 
 	.check_preempt_curr	= check_preempt_wakeup,
 
-	.pick_next_task		= pick_next_task_ipanema,
+	.pick_next_task		= __pick_next_task_ipanema,
 	.put_prev_task		= put_prev_task_ipanema,
+	.set_next_task	        = set_next_task_ipanema,
 
 #ifdef CONFIG_SMP
 	.balance                = balance_ipanema,
+	.pick_task		= pick_task_ipanema,
 	.select_task_rq		= select_task_rq_ipanema,
 	.migrate_task_rq	= migrate_task_rq_ipanema,
 
@@ -1425,7 +1436,7 @@ const struct sched_class ipanema_sched_class = {
 	.set_cpus_allowed	= set_cpus_allowed_common,
 #endif
 
-	.set_next_task	        = set_next_task_ipanema,
+
 	.task_tick	        = task_tick_ipanema,
 	.task_fork	        = task_fork_ipanema,
 
