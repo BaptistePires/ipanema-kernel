@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
 #include "asm-generic/rwonce.h"
+#include "linux/sched.h"
 #define pr_fmt(fmt) "ipanema: " fmt
 
 #include "sched.h"
@@ -803,7 +804,7 @@ static void enqueue_task_ipanema(struct rq *rq,
 	if (flags & ENQUEUE_RESTORE)
 		goto end;
 
-	pr_warn("[WARN] Uncaught enqueue, CONTEXT: p=[pid=%d, cpu=%d, state=%ld, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
+	pr_warn("[WARN] Uncaught enqueue, CONTEXT: p=[pid=%d, cpu=%d, state=%u, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
 		       p->pid, task_cpu(p), READ_ONCE(p->__state), p->on_cpu, p->on_rq,
 		       ipanema_state_to_str(ipanema_task_state(p)),
 		       rq->cpu, rq, flags);
@@ -843,7 +844,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 				 struct task_struct *p,
 				 int flags)
 {
-	int state;
+	unsigned int state;
 	struct process_event e = { .target = p, .cpu = smp_processor_id() };
 
 	if (unlikely(ipanema_sched_class_log))
@@ -926,7 +927,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 	 * the rbtree now, it will be scheduled again while it is not queued,
 	 * which will lead to a crash.
 	 */
-	if (p->flags & PF_EXITPIDONE) {
+	if (p->flags & PF_EXITING) {
 		ipanema_terminate(&e);
 		goto end;
 	}
@@ -938,7 +939,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 	if (flags & DEQUEUE_SAVE)
 		goto end;
 
-	pr_warn("[WARN] Uncaught dequeue, CONTEXT: p=[pid=%d, cpu=%d, state=%ld, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
+	pr_warn("[WARN] Uncaught dequeue, CONTEXT: p=[pid=%d, cpu=%d, state=%u, on_cpu=%d, on_rq=%d, ipanema=[current_state=%s]]; rq[%d]=%p; flags=%d\n",
 		p->pid, task_cpu(p), READ_ONCE(p->__state), p->on_cpu, p->on_rq,
 		ipanema_state_to_str(ipanema_task_state(p)),
 		rq->cpu, rq, flags);
