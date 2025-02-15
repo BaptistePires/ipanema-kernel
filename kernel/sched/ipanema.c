@@ -2,7 +2,6 @@
 
 #include "asm-generic/rwonce.h"
 #include "linux/sched.h"
-#define pr_fmt(fmt) "ipanema: " fmt
 
 #include "sched.h"
 #include "ipanema.h"
