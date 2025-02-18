@@ -1454,7 +1454,7 @@ DEFINE_SCHED_CLASS(ipanema) = {
 #endif
 };
 
-void trigger_load_balance_ipanema(struct rq *rq)
+void sched_balance_trigger_ipanema(struct rq *rq)
 {
 	raise_softirq(SCHED_SOFTIRQ_IPANEMA);
 }
