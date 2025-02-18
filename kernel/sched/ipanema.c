@@ -1397,7 +1397,7 @@ static unsigned int get_rr_interval_ipanema(struct rq *rq,
 }
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
-static void task_change_group_ipanema(struct task_struct *p, int type)
+static void task_change_group_ipanema(struct task_struct *p)
 {
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [pid=%d]\n",
@@ -1901,11 +1901,11 @@ static int ipanema_policies_open(struct inode *inode, struct file *file)
 	return seq_open(file, &ipanema_policies_ops);
 }
 
-static const struct file_operations ipanema_policies_fops = {
-	.open    = ipanema_policies_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release,
+static const struct proc_ops ipanema_policies_fops = {
+	.proc_open    = ipanema_policies_open,
+	.proc_read    = seq_read,
+	.proc_lseek  = seq_lseek,
+	.proc_release = seq_release,
 };
 
 struct proc_dir_entry *ipa_procdir;
