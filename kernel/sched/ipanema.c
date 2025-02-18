@@ -136,7 +136,7 @@ end:
 }
 EXPORT_SYMBOL(ipanema_remove_policy);
 
-void ipanema_core_entry(struct ipanema_policy *policy, unsigned int core)
+static void ipanema_core_entry(struct ipanema_policy *policy, unsigned int core)
 {
 	struct core_event e = { .target = core };
 
@@ -146,7 +146,7 @@ void ipanema_core_entry(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->core_entry(policy, &e);
 }
 
-void ipanema_core_exit(struct ipanema_policy *policy, unsigned int core)
+static void ipanema_core_exit(struct ipanema_policy *policy, unsigned int core)
 {
 	struct core_event e = { .target = core };
 
@@ -156,7 +156,7 @@ void ipanema_core_exit(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->core_exit(policy, &e);
 }
 
-enum ipanema_core_state ipanema_get_core_state(struct ipanema_policy *policy,
+static enum ipanema_core_state ipanema_get_core_state(struct ipanema_policy *policy,
 					       unsigned int core)
 {
 	struct core_event e = { .target = core };
@@ -167,7 +167,7 @@ enum ipanema_core_state ipanema_get_core_state(struct ipanema_policy *policy,
 	return policy->routines->get_core_state(policy, &e);
 }
 
-int ipanema_new_prepare(struct process_event *e)
+static int ipanema_new_prepare(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct ipanema_policy *policy;
@@ -192,7 +192,7 @@ int ipanema_new_prepare(struct process_event *e)
 	return policy->routines->new_prepare(policy, e);
 }
 
-void ipanema_new_place(struct process_event *e)
+static void ipanema_new_place(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct ipanema_policy *policy;
@@ -207,20 +207,21 @@ void ipanema_new_place(struct process_event *e)
 	policy->routines->new_place(policy, e);
 }
 
-void ipanema_new_end(struct process_event *e)
-{
-	struct task_struct *p = e->target;
-	struct ipanema_policy *policy;
+/* Not used yet. Cause compiling errors. */
+// static void ipanema_new_end(struct process_event *e)
+// {
+// 	struct task_struct *p = e->target;
+// 	struct ipanema_policy *policy;
 
-	policy = ipanema_task_policy(p);
+// 	policy = ipanema_task_policy(p);
 
-	WARN(!policy->routines->new_end,
-	     "%s is NULL in policy %s\n", __func__, policy->name);
+// 	WARN(!policy->routines->new_end,
+// 	     "%s is NULL in policy %s\n", __func__, policy->name);
 
-	policy->routines->new_end(policy, e);
-}
+// 	policy->routines->new_end(policy, e);
+// }
 
-void ipanema_tick(struct process_event *e)
+static void ipanema_tick(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct rq *rq = task_rq(p);
@@ -240,7 +241,7 @@ void ipanema_tick(struct process_event *e)
 	policy->routines->tick(policy, e);
 }
 
-void ipanema_yield(struct process_event *e)
+static void ipanema_yield(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct rq *rq = task_rq(p);
@@ -260,7 +261,7 @@ void ipanema_yield(struct process_event *e)
 	policy->routines->yield(policy, e);
 }
 
-void ipanema_block(struct process_event *e)
+static void ipanema_block(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct rq *rq = task_rq(p);
@@ -280,7 +281,7 @@ void ipanema_block(struct process_event *e)
 	policy->routines->block(policy, e);
 }
 
-int ipanema_unblock_prepare(struct process_event *e)
+static int ipanema_unblock_prepare(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct ipanema_policy *policy;
@@ -295,7 +296,7 @@ int ipanema_unblock_prepare(struct process_event *e)
 	return policy->routines->unblock_prepare(policy, e);
 }
 
-void ipanema_unblock_place(struct process_event *e)
+static void ipanema_unblock_place(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct ipanema_policy *policy;
@@ -310,22 +311,23 @@ void ipanema_unblock_place(struct process_event *e)
 	policy->routines->unblock_place(policy, e);
 }
 
-void ipanema_unblock_end(struct process_event *e)
-{
-	struct task_struct *p = e->target;
-	struct ipanema_policy *policy;
+/* Not used yet. Cause compiling error. */
+// static void ipanema_unblock_end(struct process_event *e)
+// {
+// 	struct task_struct *p = e->target;
+// 	struct ipanema_policy *policy;
 
-	lockdep_assert_held(&p->pi_lock);
+// 	lockdep_assert_held(&p->pi_lock);
 
-	policy = ipanema_task_policy(p);
+// 	policy = ipanema_task_policy(p);
 
-	WARN(!policy->routines->unblock_end,
-	     "%s is NULL in policy %s\n", __func__, policy->name);
+// 	WARN(!policy->routines->unblock_end,
+// 	     "%s is NULL in policy %s\n", __func__, policy->name);
 
-	policy->routines->unblock_end(policy, e);
-}
+// 	policy->routines->unblock_end(policy, e);
+// }
 
-void ipanema_terminate(struct process_event *e)
+static void ipanema_terminate(struct process_event *e)
 {
 	struct task_struct *p = e->target;
 	struct rq *rq = task_rq(p);
@@ -344,7 +346,7 @@ void ipanema_terminate(struct process_event *e)
 	module_put(policy->kmodule);
 }
 
-void ipanema_schedule(struct ipanema_policy *policy, unsigned int core)
+static void ipanema_schedule(struct ipanema_policy *policy, unsigned int core)
 {
 	struct rq *rq = cpu_rq(core);
 
@@ -363,7 +365,7 @@ void ipanema_schedule(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->schedule(policy, core);
 }
 
-void ipanema_newly_idle(struct ipanema_policy *policy, unsigned int core,
+static void ipanema_newly_idle(struct ipanema_policy *policy, unsigned int core,
 			struct rq_flags *rf)
 {
 	struct core_event e = { .target = core };
@@ -388,7 +390,7 @@ void ipanema_newly_idle(struct ipanema_policy *policy, unsigned int core,
 	rq_repin_lock(rq, rf);
 }
 
-void ipanema_enter_idle(struct ipanema_policy *policy, unsigned int core)
+static void ipanema_enter_idle(struct ipanema_policy *policy, unsigned int core)
 {
 	struct core_event e = { .target = core };
 
@@ -398,7 +400,7 @@ void ipanema_enter_idle(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->enter_idle(policy, &e);
 }
 
-void ipanema_exit_idle(struct ipanema_policy *policy, unsigned int core)
+static void ipanema_exit_idle(struct ipanema_policy *policy, unsigned int core)
 {
 	struct core_event e = { .target = core };
 
@@ -408,7 +410,7 @@ void ipanema_exit_idle(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->exit_idle(policy, &e);
 }
 
-void ipanema_balancing_select(void)
+static void ipanema_balancing_select(void)
 {
 	unsigned int core = smp_processor_id();
 	struct ipanema_policy *policy;
@@ -423,9 +425,6 @@ void ipanema_balancing_select(void)
 	read_unlock_irqrestore(&ipanema_rwlock, flags);
 }
 
-void ipanema_init(void)
-{
-}
 
 struct task_struct *ipanema_get_task_of(void *proc)
 {
@@ -818,7 +817,7 @@ end:
 static void update_curr_ipanema(struct rq *rq)
 {
 	struct task_struct *curr = rq->curr;
-	u64 delta_exec;
+	s64 delta_exec;
 
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [rq=%d]\n", __func__, rq->cpu);
@@ -1407,7 +1406,7 @@ static void task_change_group_ipanema(struct task_struct *p)
 }
 #endif
 
-void run_rebalance_domains(struct softirq_action *h)
+static void run_rebalance_domains(struct softirq_action *h)
 {
 	ipanema_balancing_select();
 }
@@ -1418,7 +1417,7 @@ DEFINE_SCHED_CLASS(ipanema) = {
 	.yield_task		= yield_task_ipanema,
 	.yield_to_task		= yield_to_task_ipanema,
 
-	.check_preempt_curr	= check_preempt_wakeup,
+	.wakeup_preempt		= check_preempt_wakeup,
 
 	.pick_next_task		= __pick_next_task_ipanema,
 	.put_prev_task		= put_prev_task_ipanema,
@@ -2008,7 +2007,7 @@ __init void init_sched_ipanema_class(void)
 	pr_info("sched_class initialized\n");
 }
 
-__init int init_sched_ipanema_late(void)
+static __init int init_sched_ipanema_late(void)
 {
 	int ret;
 
