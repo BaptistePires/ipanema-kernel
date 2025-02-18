@@ -1483,7 +1483,7 @@ static int create_topology(void)
 				return -ENOMEM;
 			if (sd->flags & SD_SHARE_CPUCAPACITY)
 				l->flags |= DOMAIN_SMT;
-			if (sd->flags & SD_SHARE_PKG_RESOURCES)
+			if (sd->flags & SD_SHARE_LLC)
 				l->flags |= DOMAIN_CACHE;
 			if (sd->flags & SD_NUMA)
 				l->flags |= DOMAIN_NUMA;
