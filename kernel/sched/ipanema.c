@@ -903,6 +903,11 @@ static void dequeue_task_ipanema(struct rq *rq,
 	 *
 	 * We add TASK_KILLABLE to make sure that all received signals are
 	 * handled correctly.
+	 * 
+	 * We add TASK_WAKING because of the race between __schedule() and ttwu().
+	 * __schedule() can call dequeue_task_ipanema(p) while p is being woken
+	 * up by another task in ttwu(), thus leading to p->__state = TAKS_WAKING.
+	 * We must handle this case as a block/unblock pair.
 	 *
 	 * We also check for the OUSTED flag and TASK_ON_RQ_MIGRATING to
 	 * simulate a block/unblock pair when a thread is kicked out from its
@@ -913,7 +918,7 @@ static void dequeue_task_ipanema(struct rq *rq,
 	if (state & TASK_INTERRUPTIBLE ||
 	    state & TASK_UNINTERRUPTIBLE ||
 	    state & TASK_STOPPED ||
-	    state & TASK_KILLABLE ||
+	    state & TASK_KILLABLE || state & TASK_WAKING ||
 	    (flags & OUSTED && task_on_rq_migrating(p))) {
 		ipanema_block(&e);
 		goto end;
