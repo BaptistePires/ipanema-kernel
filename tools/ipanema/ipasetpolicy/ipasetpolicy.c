@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <sys/syscall.h>
 
-#define SCHED_IPANEMA  7
+#define SCHED_IPANEMA  8
 
 struct sched_attr {
 	uint32_t size;
