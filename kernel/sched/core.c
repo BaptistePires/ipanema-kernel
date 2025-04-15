@@ -7053,6 +7053,9 @@ const struct sched_class *__setscheduler_class(int policy, int prio)
 		return &ext_sched_class;
 #endif
 
+	if (policy == SCHED_IPANEMA)
+		return &ipanema_sched_class;
+
 	return &fair_sched_class;
 }
 

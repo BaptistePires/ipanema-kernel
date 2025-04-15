@@ -778,7 +778,7 @@ change:
 	 */
 	if (queued || (ipanema_policy(p->policy) &&
 		       queue_flags & SWITCHING_CLASS))
-		dequeue_task(rq, p, queue_flags);
+		dequeue_task(rq, p, queue_flags  | SWITCHING_CLASS);
 	if (running) {
 		p->ipanema.nopreempt = 1;
 		put_prev_task(rq, p);
