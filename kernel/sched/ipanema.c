@@ -823,9 +823,7 @@ end:
 }
 
 static void update_curr_ipanema(struct rq *rq)
-{
-	struct task_struct *curr = rq->curr;
-	s64 delta_exec;
+{	s64 delta_exec;
 
 	if (unlikely(ipanema_sched_class_log))
 		pr_info("In %s [rq=%d]\n", __func__, rq->cpu);
@@ -834,18 +832,9 @@ static void update_curr_ipanema(struct rq *rq)
 	 * We now update statistics. Needed to get %CPU working for Ipanema
 	 * processes in top, for instance.
 	 */
-	delta_exec = rq_clock_task(rq) - curr->se.exec_start;
+	delta_exec = update_curr_common(rq);
 	if (unlikely((s64)delta_exec <= 0))
 		return;
-
-	schedstat_set(curr->stats.exec_max,
-		      max(curr->stats.exec_max, delta_exec));
-
-	curr->se.sum_exec_runtime += delta_exec;
-	account_group_exec_runtime(curr, delta_exec);
-
-	curr->se.exec_start = rq_clock_task(rq);
-	cpuacct_charge(curr, delta_exec);
 }
 
 static bool dequeue_task_ipanema(struct rq *rq,
