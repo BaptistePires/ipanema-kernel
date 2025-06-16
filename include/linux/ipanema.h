@@ -47,6 +47,7 @@ struct ipanema_runtime_metadata;
 struct process_event {
 	struct task_struct *target;
 	int cpu;
+	unsigned int flags;
 };
 
 struct core_event {
