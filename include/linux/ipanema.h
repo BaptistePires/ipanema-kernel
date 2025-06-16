@@ -129,6 +129,17 @@ struct topology_level {
 	struct topology_level *next;
 };
 
+
+/* Wake flags. The first three directly map to some SD flag value */
+#define IPANEMA_WF_EXEC			0x02 /* Wakeup after exec; maps to SD_BALANCE_EXEC */
+#define IPANEMA_WF_FORK			0x04 /* Wakeup after fork; maps to SD_BALANCE_FORK */
+#define IPANEMA_WF_TTWU			0x08 /* Wakeup;            maps to SD_BALANCE_WAKE */
+
+#define IPANEMA_WF_SYNC			0x10 /* Waker goes to sleep after wakeup */
+#define IPANEMA_WF_MIGRATED		0x20 /* Internal use, task got migrated */
+#define IPANEMA_WF_CURRENT_CPU		0x40 /* Prefer to move the wakee to the current CPU. */
+#define IPANEMA_WF_RQ_SELECTED		0x80 /* ->select_task_rq() was called */
+
 void change_state(struct task_struct *p, enum ipanema_state next_state,
 		  unsigned int next_cpu, struct ipanema_rq *next_rq);
 struct task_struct *ipanema_first_of_state(enum ipanema_state state,
@@ -138,6 +149,8 @@ struct task_struct *ipanema_get_task_of(void *proc);
 
 int ipanema_add_policy(struct ipanema_policy *policy);
 int ipanema_remove_policy(struct ipanema_policy *policy);
+
+bool ipanema_smt_active(void);
 
 int count(enum ipanema_state state, unsigned int cpu);
 

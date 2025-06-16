@@ -3,10 +3,12 @@
 #include "asm-generic/rwonce.h"
 #include "linux/ipanema.h"
 #include "linux/compiler.h"
+#include "linux/export.h"
 #include "linux/jump_label.h"
 #include "linux/sched.h"
 
 
+#include "linux/sched/smt.h"
 #include <linux/lockdep.h>
 #include <linux/cpufreq.h>
 #include <linux/kgdb.h>
@@ -143,6 +145,12 @@ end:
 	return ret;
 }
 EXPORT_SYMBOL(ipanema_remove_policy);
+
+bool ipanema_smt_active(void)
+{
+	return sched_smt_active();
+}
+EXPORT_SYMBOL(ipanema_smt_active);
 
 static void ipanema_core_entry(struct ipanema_policy *policy, unsigned int core)
 {
@@ -1300,7 +1308,7 @@ static int select_task_rq_ipanema(struct task_struct *p,
 				  int prev_cpu,
 				  int wake_flags)
 {
-	struct process_event e = { .target = p, .cpu = smp_processor_id() };
+	struct process_event e = { .target = p, .cpu = smp_processor_id(), .flags = wake_flags };
 	int ret = task_cpu(p);
 
 	if (unlikely(ipanema_sched_class_log))
