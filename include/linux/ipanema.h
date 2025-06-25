@@ -120,8 +120,9 @@ extern struct proc_dir_entry *ipa_procdir;
 
 /* topology level types, used as flags in struct topology_level */
 #define DOMAIN_SMT   0x1      	/* cpus share computing units (simultaneous multi-threading) */
-#define DOMAIN_CACHE 0x2	/* cpus share a hardware cache */
-#define DOMAIN_NUMA  0x4	/* cpus may be on different NUMA nodes */
+#define DOMAIN_CLUSTER  0x2	/* cpus share LLC tags or L2 cache */
+#define DOMAIN_CACHE 0x4	/* cpus share a hardware cache */
+#define DOMAIN_NUMA  0x8	/* cpus may be on different NUMA nodes */
 
 struct topology_level {
 	cpumask_t cores;

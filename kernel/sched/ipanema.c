@@ -1611,6 +1611,8 @@ static int create_topology(void)
 				return -ENOMEM;
 			if (sd->flags & SD_SHARE_CPUCAPACITY)
 				l->flags |= DOMAIN_SMT;
+			if (sd->flags & SD_CLUSTER)
+				l->flags |= DOMAIN_CLUSTER;
 			if (sd->flags & SD_SHARE_LLC)
 				l->flags |= DOMAIN_CACHE;
 			if (sd->flags & SD_NUMA)
@@ -1640,14 +1642,15 @@ static void print_topology(void)
 	pr_info("+-----------------------+\n");
 	pr_info("|    ipanema topology   |\n");
 	pr_info("+-----------------------+\n");
-	pr_info("  cpu  | SMT | CACHE | NUMA |   cpulist\n");
+	pr_info("  cpu  | SMT | CLUSTER | CACHE | NUMA |   cpulist\n");
 	for_each_possible_cpu(cpu) {
-		pr_info("-------+-----+-------+------+--------------\n");
+		pr_info("-------+-----+-------+-------+------+--------------\n");
 		pr_info(" %5d |\n", cpu);
 		l = per_cpu(topology_levels, cpu);
 		while (l) {
-			pr_info("       |  %d  |   %d   |   %d  | %*pbl\n",
+			pr_info("       |  %d  |   %d   |   %d   |   %d  | %*pbl\n",
 				l->flags & DOMAIN_SMT ? 1 : 0,
+				l->flags & DOMAIN_CLUSTER ? 1 : 0,
 				l->flags & DOMAIN_CACHE ? 1 : 0,
 				l->flags & DOMAIN_NUMA ? 1 : 0,
 				cpumask_pr_args(&l->cores));
