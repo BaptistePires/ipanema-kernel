@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <sys/syscall.h>
 
-#define SCHED_IPANEMA  7
+#define SCHED_IPANEMA  8
 
 struct sched_attr {
 	uint32_t size;
@@ -30,6 +30,10 @@ struct sched_attr {
 	uint32_t sched_ipa_policy;
 	uint32_t sched_ipa_attr_size;
 	void *sched_ipa_attr;
+
+	/* Utilization hints */
+	uint32_t sched_util_min;
+	uint32_t sched_util_max;
 };
 
 static int sched_setattr(pid_t pid, const struct sched_attr *attr,

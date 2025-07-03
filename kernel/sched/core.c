@@ -7050,6 +7050,8 @@ const struct sched_class *__setscheduler_class(int policy, int prio)
 	if (task_should_scx(policy))
 		return &ext_sched_class;
 #endif
+	if (policy == SCHED_IPANEMA)
+		return &ipanema_sched_class;
 
 	return &fair_sched_class;
 }
@@ -8393,7 +8395,8 @@ void __init sched_init(void)
 #endif
 	BUG_ON(!sched_class_above(&dl_sched_class, &rt_sched_class));
 	BUG_ON(!sched_class_above(&rt_sched_class, &fair_sched_class));
-	BUG_ON(!sched_class_above(&fair_sched_class, &idle_sched_class));
+	BUG_ON(!sched_class_above(&fair_sched_class, &ipanema_sched_class));
+	BUG_ON(!sched_class_above(&ipanema_sched_class, &idle_sched_class));
 #ifdef CONFIG_SCHED_CLASS_EXT
 	BUG_ON(!sched_class_above(&fair_sched_class, &ext_sched_class));
 	BUG_ON(!sched_class_above(&ext_sched_class, &idle_sched_class));

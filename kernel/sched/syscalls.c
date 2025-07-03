@@ -15,6 +15,7 @@
 
 #include "sched.h"
 #include "autogroup.h"
+#include "ipanema.h"
 
 static inline int __normal_prio(int policy, int rt_prio, int nice)
 {
@@ -94,7 +95,7 @@ void set_user_nice(struct task_struct *p, long nice)
 	running = task_current(rq, p);
 	if (queued)
 		dequeue_task(rq, p, DEQUEUE_SAVE | DEQUEUE_NOCLOCK);
-	if (running){
+	if (running) {
 		p->ipanema.nopreempt = 1;
 		put_prev_task(rq, p);
 	}
@@ -318,6 +319,8 @@ static void __setscheduler_params(struct task_struct *p,
 			p->se.custom_slice = 0;
 			p->se.slice = sysctl_sched_base_slice;
 		}
+	} else if (ipanema_policy(policy)) {
+		__setparam_ipanema(p, attr);
 	}
 
 	/* rt-policy tasks do not have a timerslack */
@@ -540,6 +543,7 @@ int __sched_setscheduler(struct task_struct *p,
 	int reset_on_fork;
 	int queue_flags = DEQUEUE_SAVE | DEQUEUE_MOVE | DEQUEUE_NOCLOCK;
 	struct rq *rq;
+	int ipa_policy;
 	bool cpuset_locked = false;
 
 	/* The pi code expects interrupts enabled */
@@ -620,6 +624,54 @@ recheck:
 	retval = scx_check_setscheduler(p, policy);
 	if (retval)
 		goto unlock;
+
+	/*
+	 * If switching to SCHED_IPANEMA, check that the ipanema policy exists
+	 * and check cgroups to see if it's ok
+	 */
+	ipa_policy = attr->sched_ipa_policy;
+	if (ipanema_policy(policy)) {
+		struct ipanema_policy *cur_policy = NULL;
+		int found = 0;
+#ifdef CONFIG_CGROUP_IPANEMA
+		struct cgroup_subsys_state *css;
+		struct ipanema_group *ipa_grp;
+		struct ipanema_policy *cgrp_policy;
+#endif	/* CONFIG_CGROUP_IPANEMA */
+
+		if (attr->sched_ipa_policy == -1 && ipanema_task_policy(p))
+			ipa_policy = ipanema_task_policy(p)->id;
+
+#ifdef CONFIG_CGROUP_IPANEMA
+		/*
+		 * If process is in an ipanema cgroup, check that it is not
+		 * moving to another ipanema policy
+		 */
+		css = p->cgroups->subsys[ipanema_cgrp_id];
+		ipa_grp = ipanema_group_of(css);
+		cgrp_policy = ipa_grp->policy;
+		if (cgrp_policy) {
+			if (ipa_policy != cgrp_policy->id) {
+				retval = -EINVAL;
+				goto unlock;
+			}
+		}
+#endif	/* CONFIG_CGROUP_IPANEMA */
+
+		read_lock(&ipanema_rwlock);
+		list_for_each_entry(cur_policy, &ipanema_policies, list) {
+			if (cur_policy->id == ipa_policy) {
+				found = 1;
+				ipanema_task_policy(p) = cur_policy;
+				break;
+			}
+		}
+		read_unlock(&ipanema_rwlock);
+		if (!found || !__checkparam_ipanema(attr, cur_policy)) {
+			retval = -EINVAL;
+			goto unlock;
+		}
+	}
 
 	/*
 	 * If not changing anything there's no need to proceed further,
@@ -719,8 +771,15 @@ change:
 
 	queued = task_on_rq_queued(p);
 	running = task_current(rq, p);
-	if (queued)
-		dequeue_task(rq, p, queue_flags);
+	/*
+	 * We also call dequeue_task() on tasks that use the ipanema sched class
+	 * if they are switching class to force the call to the terminate()
+	 * handler, and decrease the refcnt of the ipanema policy module. It is
+	 * kind of hacky, but it works.
+	 */
+	if (queued || (ipanema_policy(p->policy) &&
+		       queue_flags & SWITCHING_CLASS))
+		dequeue_task(rq, p, queue_flags  | SWITCHING_CLASS);
 	if (running) {
 		p->ipanema.nopreempt = 1;
 		put_prev_task(rq, p);
@@ -945,6 +1004,22 @@ static int sched_copy_attr(struct sched_attr __user *uattr, struct sched_attr *a
 	 */
 	attr->sched_nice = clamp(attr->sched_nice, MIN_NICE, MAX_NICE);
 
+	/* Copy attributes of the ipanema policy of necessary */
+	if (ipanema_policy(attr->sched_policy) &&
+	    attr->sched_ipa_attr_size > 0) {
+		attr->sched_ipa_attr = kzalloc(attr->sched_ipa_attr_size,
+					       GFP_KERNEL);
+		if (!attr->sched_ipa_attr)
+			return -ENOMEM;
+		ret = copy_from_user(attr->sched_ipa_attr,
+				     uattr->sched_ipa_attr,
+				     attr->sched_ipa_attr_size);
+		if (ret) {
+			kfree(attr->sched_ipa_attr);
+			return -EFAULT;
+		}
+	}
+
 	return 0;
 
 err_size:
@@ -1019,6 +1094,10 @@ SYSCALL_DEFINE3(sched_setattr, pid_t, pid, struct sched_attr __user *, uattr,
 	CLASS(find_get_task, p)(pid);
 	if (!p)
 		return -ESRCH;
+
+	/* Free ipanema attr if necessary */
+	if (ipanema_policy(attr.sched_policy))
+		kfree(attr.sched_ipa_attr);
 
 	if (attr.sched_flags & SCHED_FLAG_KEEP_PARAMS)
 		get_params(p, &attr);
@@ -1546,6 +1625,7 @@ SYSCALL_DEFINE1(sched_get_priority_max, int, policy)
 	case SCHED_NORMAL:
 	case SCHED_BATCH:
 	case SCHED_IDLE:
+	case SCHED_IPANEMA:
 	case SCHED_EXT:
 		ret = 0;
 		break;
@@ -1574,6 +1654,7 @@ SYSCALL_DEFINE1(sched_get_priority_min, int, policy)
 	case SCHED_NORMAL:
 	case SCHED_BATCH:
 	case SCHED_IDLE:
+	case SCHED_IPANEMA:
 	case SCHED_EXT:
 		ret = 0;
 	}
