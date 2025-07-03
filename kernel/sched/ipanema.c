@@ -1396,8 +1396,8 @@ void run_rebalance_domains(struct softirq_action *h)
 	ipanema_balancing_select();
 }
 
-const struct sched_class ipanema_sched_class = {
-	.next			= &idle_sched_class,
+const struct sched_class ipanema_sched_class
+	__attribute__((section("__ipanema_sched_class"))) = {
 	.enqueue_task		= enqueue_task_ipanema,
 	.dequeue_task		= dequeue_task_ipanema,
 	.yield_task		= yield_task_ipanema,
