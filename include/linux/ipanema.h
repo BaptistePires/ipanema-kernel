@@ -47,6 +47,7 @@ struct ipanema_runtime_metadata;
 struct process_event {
 	struct task_struct *target;
 	int cpu;
+	unsigned int flags;
 };
 
 struct core_event {
@@ -119,14 +120,26 @@ extern struct proc_dir_entry *ipa_procdir;
 
 /* topology level types, used as flags in struct topology_level */
 #define DOMAIN_SMT   0x1      	/* cpus share computing units (simultaneous multi-threading) */
-#define DOMAIN_CACHE 0x2	/* cpus share a hardware cache */
-#define DOMAIN_NUMA  0x4	/* cpus may be on different NUMA nodes */
+#define DOMAIN_CLUSTER  0x2	/* cpus share LLC tags or L2 cache */
+#define DOMAIN_CACHE 0x4	/* cpus share a hardware cache */
+#define DOMAIN_NUMA  0x8	/* cpus may be on different NUMA nodes */
 
 struct topology_level {
 	cpumask_t cores;
 	int flags;
 	struct topology_level *next;
 };
+
+
+/* Wake flags. The first three directly map to some SD flag value */
+#define IPANEMA_WF_EXEC			0x02 /* Wakeup after exec; maps to SD_BALANCE_EXEC */
+#define IPANEMA_WF_FORK			0x04 /* Wakeup after fork; maps to SD_BALANCE_FORK */
+#define IPANEMA_WF_TTWU			0x08 /* Wakeup;            maps to SD_BALANCE_WAKE */
+
+#define IPANEMA_WF_SYNC			0x10 /* Waker goes to sleep after wakeup */
+#define IPANEMA_WF_MIGRATED		0x20 /* Internal use, task got migrated */
+#define IPANEMA_WF_CURRENT_CPU		0x40 /* Prefer to move the wakee to the current CPU. */
+#define IPANEMA_WF_RQ_SELECTED		0x80 /* ->select_task_rq() was called */
 
 void change_state(struct task_struct *p, enum ipanema_state next_state,
 		  unsigned int next_cpu, struct ipanema_rq *next_rq);
@@ -137,6 +150,8 @@ struct task_struct *ipanema_get_task_of(void *proc);
 
 int ipanema_add_policy(struct ipanema_policy *policy);
 int ipanema_remove_policy(struct ipanema_policy *policy);
+
+bool ipanema_smt_active(void);
 
 int count(enum ipanema_state state, unsigned int cpu);
 
