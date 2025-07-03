@@ -15,6 +15,7 @@
 #include "selftest.h"
 #include "rx_common.h"
 #include "ethtool_common.h"
+#include "mcdi_port_common.h"
 
 struct efx_sw_stat_desc {
 	const char *name;
@@ -90,6 +91,7 @@ static const struct efx_sw_stat_desc efx_sw_stat_desc[] = {
 	EFX_ETHTOOL_UINT_CHANNEL_STAT(rx_xdp_bad_drops),
 	EFX_ETHTOOL_UINT_CHANNEL_STAT(rx_xdp_tx),
 	EFX_ETHTOOL_UINT_CHANNEL_STAT(rx_xdp_redirect),
+	EFX_ETHTOOL_UINT_CHANNEL_STAT(rx_mport_bad),
 #ifdef CONFIG_RFS_ACCEL
 	EFX_ETHTOOL_UINT_CHANNEL_STAT_NO_N(rfs_filter_count),
 	EFX_ETHTOOL_UINT_CHANNEL_STAT(rfs_succeeded),
@@ -102,10 +104,9 @@ static const struct efx_sw_stat_desc efx_sw_stat_desc[] = {
 void efx_ethtool_get_drvinfo(struct net_device *net_dev,
 			     struct ethtool_drvinfo *info)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 
 	strlcpy(info->driver, KBUILD_MODNAME, sizeof(info->driver));
-	strlcpy(info->version, EFX_DRIVER_VERSION, sizeof(info->version));
 	efx_mcdi_print_fwver(efx, info->fw_version,
 			     sizeof(info->fw_version));
 	strlcpy(info->bus_info, pci_name(efx->pci_dev), sizeof(info->bus_info));
@@ -113,14 +114,14 @@ void efx_ethtool_get_drvinfo(struct net_device *net_dev,
 
 u32 efx_ethtool_get_msglevel(struct net_device *net_dev)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 
 	return efx->msg_enable;
 }
 
 void efx_ethtool_set_msglevel(struct net_device *net_dev, u32 msg_enable)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 
 	efx->msg_enable = msg_enable;
 }
@@ -128,7 +129,7 @@ void efx_ethtool_set_msglevel(struct net_device *net_dev, u32 msg_enable)
 void efx_ethtool_self_test(struct net_device *net_dev,
 			   struct ethtool_test *test, u64 *data)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	struct efx_self_tests *efx_tests;
 	bool already_up;
 	int rc = -ENOMEM;
@@ -137,7 +138,7 @@ void efx_ethtool_self_test(struct net_device *net_dev,
 	if (!efx_tests)
 		goto fail;
 
-	if (efx->state != STATE_READY) {
+	if (!efx_net_active(efx->state)) {
 		rc = -EBUSY;
 		goto out;
 	}
@@ -176,7 +177,7 @@ fail:
 void efx_ethtool_get_pauseparam(struct net_device *net_dev,
 				struct ethtool_pauseparam *pause)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 
 	pause->rx_pause = !!(efx->wanted_fc & EFX_FC_RX);
 	pause->tx_pause = !!(efx->wanted_fc & EFX_FC_TX);
@@ -186,7 +187,7 @@ void efx_ethtool_get_pauseparam(struct net_device *net_dev,
 int efx_ethtool_set_pauseparam(struct net_device *net_dev,
 			       struct ethtool_pauseparam *pause)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	u8 wanted_fc, old_fc;
 	u32 old_adv;
 	int rc = 0;
@@ -221,7 +222,7 @@ int efx_ethtool_set_pauseparam(struct net_device *net_dev,
 	efx_link_set_wanted_fc(efx, wanted_fc);
 	if (efx->link_advertising[0] != old_adv ||
 	    (efx->wanted_fc ^ old_fc) & EFX_FC_AUTO) {
-		rc = efx->phy_op->reconfigure(efx);
+		rc = efx_mcdi_port_reconfigure(efx);
 		if (rc) {
 			netif_err(efx, drv, efx->net_dev,
 				  "Unable to advertise requested flow "
@@ -372,20 +373,15 @@ int efx_ethtool_fill_self_tests(struct efx_nic *efx,
 	efx_fill_test(n++, strings, data, &tests->registers,
 		      "core", 0, "registers", NULL);
 
-	if (efx->phy_op->run_tests != NULL) {
-		EFX_WARN_ON_PARANOID(efx->phy_op->test_name == NULL);
+	for (i = 0; true; ++i) {
+		const char *name;
 
-		for (i = 0; true; ++i) {
-			const char *name;
+		EFX_WARN_ON_PARANOID(i >= EFX_MAX_PHY_TESTS);
+		name = efx_mcdi_phy_test_name(efx, i);
+		if (name == NULL)
+			break;
 
-			EFX_WARN_ON_PARANOID(i >= EFX_MAX_PHY_TESTS);
-			name = efx->phy_op->test_name(efx, i);
-			if (name == NULL)
-				break;
-
-			efx_fill_test(n++, strings, data, &tests->phy_ext[i],
-				      "phy", 0, name, NULL);
-		}
+		efx_fill_test(n++, strings, data, &tests->phy_ext[i], "phy", 0, name, NULL);
 	}
 
 	/* Loopback tests */
@@ -412,7 +408,7 @@ static size_t efx_describe_per_queue_stats(struct efx_nic *efx, u8 *strings)
 				snprintf(strings, ETH_GSTRING_LEN,
 					 "tx-%u.tx_packets",
 					 channel->tx_queue[0].queue /
-					 EFX_TXQ_TYPES);
+					 EFX_MAX_TXQ_PER_CHANNEL);
 
 				strings += ETH_GSTRING_LEN;
 			}
@@ -446,7 +442,7 @@ static size_t efx_describe_per_queue_stats(struct efx_nic *efx, u8 *strings)
 
 int efx_ethtool_get_sset_count(struct net_device *net_dev, int string_set)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 
 	switch (string_set) {
 	case ETH_SS_STATS:
@@ -464,7 +460,7 @@ int efx_ethtool_get_sset_count(struct net_device *net_dev, int string_set)
 void efx_ethtool_get_strings(struct net_device *net_dev,
 			     u32 string_set, u8 *strings)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	int i;
 
 	switch (string_set) {
@@ -492,7 +488,7 @@ void efx_ethtool_get_stats(struct net_device *net_dev,
 			   struct ethtool_stats *stats,
 			   u64 *data)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	const struct efx_sw_stat_desc *stat;
 	struct efx_channel *channel;
 	struct efx_tx_queue *tx_queue;
@@ -566,22 +562,16 @@ void efx_ethtool_get_stats(struct net_device *net_dev,
 int efx_ethtool_get_link_ksettings(struct net_device *net_dev,
 				   struct ethtool_link_ksettings *cmd)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	struct efx_link_state *link_state = &efx->link_state;
-	u32 supported;
 
 	mutex_lock(&efx->mac_lock);
-	efx->phy_op->get_link_ksettings(efx, cmd);
+	efx_mcdi_phy_get_link_ksettings(efx, cmd);
 	mutex_unlock(&efx->mac_lock);
 
 	/* Both MACs support pause frames (bidirectional and respond-only) */
-	ethtool_convert_link_mode_to_legacy_u32(&supported,
-						cmd->link_modes.supported);
-
-	supported |= SUPPORTED_Pause | SUPPORTED_Asym_Pause;
-
-	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.supported,
-						supported);
+	ethtool_link_ksettings_add_link_mode(cmd, supported, Pause);
+	ethtool_link_ksettings_add_link_mode(cmd, supported, Asym_Pause);
 
 	if (LOOPBACK_INTERNAL(efx)) {
 		cmd->base.speed = link_state->speed;
@@ -595,7 +585,7 @@ int efx_ethtool_get_link_ksettings(struct net_device *net_dev,
 int efx_ethtool_set_link_ksettings(struct net_device *net_dev,
 				   const struct ethtool_link_ksettings *cmd)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	int rc;
 
 	/* GMAC does not support 1000Mbps HD */
@@ -607,7 +597,7 @@ int efx_ethtool_set_link_ksettings(struct net_device *net_dev,
 	}
 
 	mutex_lock(&efx->mac_lock);
-	rc = efx->phy_op->set_link_ksettings(efx, cmd);
+	rc = efx_mcdi_phy_set_link_ksettings(efx, cmd);
 	mutex_unlock(&efx->mac_lock);
 	return rc;
 }
@@ -615,13 +605,11 @@ int efx_ethtool_set_link_ksettings(struct net_device *net_dev,
 int efx_ethtool_get_fecparam(struct net_device *net_dev,
 			     struct ethtool_fecparam *fecparam)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	int rc;
 
-	if (!efx->phy_op || !efx->phy_op->get_fecparam)
-		return -EOPNOTSUPP;
 	mutex_lock(&efx->mac_lock);
-	rc = efx->phy_op->get_fecparam(efx, fecparam);
+	rc = efx_mcdi_phy_get_fecparam(efx, fecparam);
 	mutex_unlock(&efx->mac_lock);
 
 	return rc;
@@ -630,13 +618,11 @@ int efx_ethtool_get_fecparam(struct net_device *net_dev,
 int efx_ethtool_set_fecparam(struct net_device *net_dev,
 			     struct ethtool_fecparam *fecparam)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	int rc;
 
-	if (!efx->phy_op || !efx->phy_op->get_fecparam)
-		return -EOPNOTSUPP;
 	mutex_lock(&efx->mac_lock);
-	rc = efx->phy_op->set_fecparam(efx, fecparam);
+	rc = efx_mcdi_phy_set_fecparam(efx, fecparam);
 	mutex_unlock(&efx->mac_lock);
 
 	return rc;
@@ -824,7 +810,7 @@ static int efx_ethtool_get_class_rule(struct efx_nic *efx,
 int efx_ethtool_get_rxnfc(struct net_device *net_dev,
 			  struct ethtool_rxnfc *info, u32 *rule_locs)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	u32 rss_context = 0;
 	s32 rc = 0;
 
@@ -1142,7 +1128,7 @@ static int efx_ethtool_set_class_rule(struct efx_nic *efx,
 int efx_ethtool_set_rxnfc(struct net_device *net_dev,
 			  struct ethtool_rxnfc *info)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 
 	if (efx_filter_get_rx_id_limit(efx) == 0)
 		return -EOPNOTSUPP;
@@ -1163,7 +1149,7 @@ int efx_ethtool_set_rxnfc(struct net_device *net_dev,
 
 u32 efx_ethtool_get_rxfh_indir_size(struct net_device *net_dev)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 
 	if (efx->n_rx_channels == 1)
 		return 0;
@@ -1172,7 +1158,7 @@ u32 efx_ethtool_get_rxfh_indir_size(struct net_device *net_dev)
 
 u32 efx_ethtool_get_rxfh_key_size(struct net_device *net_dev)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 
 	return efx->type->rx_hash_key_size;
 }
@@ -1180,7 +1166,7 @@ u32 efx_ethtool_get_rxfh_key_size(struct net_device *net_dev)
 int efx_ethtool_get_rxfh(struct net_device *net_dev, u32 *indir, u8 *key,
 			 u8 *hfunc)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	int rc;
 
 	rc = efx->type->rx_pull_rss_config(efx);
@@ -1201,7 +1187,7 @@ int efx_ethtool_get_rxfh(struct net_device *net_dev, u32 *indir, u8 *key,
 int efx_ethtool_set_rxfh(struct net_device *net_dev, const u32 *indir,
 			 const u8 *key, const u8 hfunc)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 
 	/* Hash function is Toeplitz, cannot be changed */
 	if (hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != ETH_RSS_HASH_TOP)
@@ -1220,7 +1206,7 @@ int efx_ethtool_set_rxfh(struct net_device *net_dev, const u32 *indir,
 int efx_ethtool_get_rxfh_context(struct net_device *net_dev, u32 *indir,
 				 u8 *key, u8 *hfunc, u32 rss_context)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	struct efx_rss_context *ctx;
 	int rc = 0;
 
@@ -1253,7 +1239,7 @@ int efx_ethtool_set_rxfh_context(struct net_device *net_dev,
 				 const u8 hfunc, u32 *rss_context,
 				 bool delete)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	struct efx_rss_context *ctx;
 	bool allocated = false;
 	int rc;
@@ -1315,7 +1301,7 @@ out_unlock:
 
 int efx_ethtool_reset(struct net_device *net_dev, u32 *flags)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	int rc;
 
 	rc = efx->type->map_reset_flags(flags);
@@ -1329,14 +1315,11 @@ int efx_ethtool_get_module_eeprom(struct net_device *net_dev,
 				  struct ethtool_eeprom *ee,
 				  u8 *data)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	int ret;
 
-	if (!efx->phy_op || !efx->phy_op->get_module_eeprom)
-		return -EOPNOTSUPP;
-
 	mutex_lock(&efx->mac_lock);
-	ret = efx->phy_op->get_module_eeprom(efx, ee, data);
+	ret = efx_mcdi_phy_get_module_eeprom(efx, ee, data);
 	mutex_unlock(&efx->mac_lock);
 
 	return ret;
@@ -1345,14 +1328,11 @@ int efx_ethtool_get_module_eeprom(struct net_device *net_dev,
 int efx_ethtool_get_module_info(struct net_device *net_dev,
 				struct ethtool_modinfo *modinfo)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
+	struct efx_nic *efx = efx_netdev_priv(net_dev);
 	int ret;
 
-	if (!efx->phy_op || !efx->phy_op->get_module_info)
-		return -EOPNOTSUPP;
-
 	mutex_lock(&efx->mac_lock);
-	ret = efx->phy_op->get_module_info(efx, modinfo);
+	ret = efx_mcdi_phy_get_module_info(efx, modinfo);
 	mutex_unlock(&efx->mac_lock);
 
 	return ret;

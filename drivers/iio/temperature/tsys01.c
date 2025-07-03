@@ -13,6 +13,7 @@
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/stat.h>
@@ -222,7 +223,7 @@ static struct i2c_driver tsys01_driver = {
 	.id_table = tsys01_id,
 	.driver = {
 		   .name = "tsys01",
-		   .of_match_table = of_match_ptr(tsys01_of_match),
+		   .of_match_table = tsys01_of_match,
 		   },
 };
 
@@ -232,3 +233,4 @@ MODULE_DESCRIPTION("Measurement-Specialties tsys01 temperature driver");
 MODULE_AUTHOR("William Markezana <william.markezana@meas-spec.com>");
 MODULE_AUTHOR("Ludovic Tancerel <ludovic.tancerel@maplehightech.com>");
 MODULE_LICENSE("GPL v2");
+MODULE_IMPORT_NS(IIO_MEAS_SPEC_SENSORS);

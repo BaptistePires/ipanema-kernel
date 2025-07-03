@@ -11,6 +11,7 @@
 #include <linux/export.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/irqdomain.h>
 #include <linux/list.h>
 #include <linux/msi.h>
 #include <linux/of.h>
@@ -38,58 +39,10 @@
 
 static int eeh_event_irq = -EINVAL;
 
-void pnv_pcibios_bus_add_device(struct pci_dev *pdev)
+static void pnv_pcibios_bus_add_device(struct pci_dev *pdev)
 {
 	dev_dbg(&pdev->dev, "EEH: Setting up device\n");
 	eeh_probe_device(pdev);
-}
-
-static int pnv_eeh_init(void)
-{
-	struct pci_controller *hose;
-	struct pnv_phb *phb;
-	int max_diag_size = PNV_PCI_DIAG_BUF_SIZE;
-
-	if (!firmware_has_feature(FW_FEATURE_OPAL)) {
-		pr_warn("%s: OPAL is required !\n",
-			__func__);
-		return -EINVAL;
-	}
-
-	/* Set probe mode */
-	eeh_add_flag(EEH_PROBE_MODE_DEV);
-
-	/*
-	 * P7IOC blocks PCI config access to frozen PE, but PHB3
-	 * doesn't do that. So we have to selectively enable I/O
-	 * prior to collecting error log.
-	 */
-	list_for_each_entry(hose, &hose_list, list_node) {
-		phb = hose->private_data;
-
-		if (phb->model == PNV_PHB_MODEL_P7IOC)
-			eeh_add_flag(EEH_ENABLE_IO_FOR_LOG);
-
-		if (phb->diag_data_size > max_diag_size)
-			max_diag_size = phb->diag_data_size;
-
-		/*
-		 * PE#0 should be regarded as valid by EEH core
-		 * if it's not the reserved one. Currently, we
-		 * have the reserved PE#255 and PE#127 for PHB3
-		 * and P7IOC separately. So we should regard
-		 * PE#0 as valid for PHB3 and P7IOC.
-		 */
-		if (phb->ioda.reserved_pe_idx != 0)
-			eeh_add_flag(EEH_VALID_PE_ZERO);
-
-		break;
-	}
-
-	eeh_set_pe_aux_size(max_diag_size);
-	ppc_md.pcibios_bus_add_device = pnv_pcibios_bus_add_device;
-
-	return 0;
 }
 
 static irqreturn_t pnv_eeh_event(int irq, void *data)
@@ -135,7 +88,7 @@ static ssize_t pnv_eeh_ei_write(struct file *filp,
 		return -EINVAL;
 
 	/* Retrieve PE */
-	pe = eeh_pe_get(hose, pe_no, 0);
+	pe = eeh_pe_get(hose, pe_no);
 	if (!pe)
 		return -ENODEV;
 
@@ -190,7 +143,7 @@ PNV_EEH_DBGFS_ENTRY(inbB, 0xE10);
 
 #endif /* CONFIG_DEBUG_FS */
 
-void pnv_eeh_enable_phbs(void)
+static void pnv_eeh_enable_phbs(void)
 {
 	struct pci_controller *hose;
 	struct pnv_phb *phb;
@@ -354,7 +307,7 @@ static struct eeh_pe *pnv_eeh_get_upstream_pe(struct pci_dev *pdev)
 	if (parent) {
 		struct pnv_ioda_pe *ioda_pe = pnv_ioda_get_pe(parent);
 
-		return eeh_pe_get(phb->hose, ioda_pe->pe_number, 0);
+		return eeh_pe_get(phb->hose, ioda_pe->pe_number);
 	}
 
 	return NULL;
@@ -438,7 +391,7 @@ static struct eeh_dev *pnv_eeh_probe(struct pci_dev *pdev)
 	 * should be blocked until PE reset. MMIO access is dropped
 	 * by hardware certainly. In order to drop PCI config requests,
 	 * one more flag (EEH_PE_CFG_RESTRICTED) is introduced, which
-	 * will be checked in the backend for PE state retrival. If
+	 * will be checked in the backend for PE state retrieval. If
 	 * the PE becomes frozen for the first time and the flag has
 	 * been set for the PE, we will set EEH_PE_CFG_BLOCKED for
 	 * that PE to block its config space.
@@ -1029,7 +982,7 @@ static int pnv_eeh_do_af_flr(struct pci_dn *pdn, int option)
 	case EEH_RESET_FUNDAMENTAL:
 		/*
 		 * Wait for Transaction Pending bit to clear. A word-aligned
-		 * test is used, so we use the conrol offset rather than status
+		 * test is used, so we use the control offset rather than status
 		 * and shift the test bit to match.
 		 */
 		pnv_eeh_wait_for_pending(pdn, "AF",
@@ -1096,7 +1049,7 @@ static int pnv_eeh_reset(struct eeh_pe *pe, int option)
 	 * frozen state during PE reset. However, the good idea here from
 	 * benh is to keep frozen state before we get PE reset done completely
 	 * (until BAR restore). With the frozen state, HW drops illegal IO
-	 * or MMIO access, which can incur recrusive frozen PE during PE
+	 * or MMIO access, which can incur recursive frozen PE during PE
 	 * reset. The side effect is that EEH core has to clear the frozen
 	 * state explicitly after BAR restore.
 	 */
@@ -1143,8 +1096,8 @@ static int pnv_eeh_reset(struct eeh_pe *pe, int option)
 	 * bus is behind a hotplug slot and it will use the slot provided
 	 * reset methods to prevent spurious hotplug events during the reset.
 	 *
-	 * Fundemental resets need to be handled internally to EEH since the
-	 * PCI core doesn't really have a concept of a fundemental reset,
+	 * Fundamental resets need to be handled internally to EEH since the
+	 * PCI core doesn't really have a concept of a fundamental reset,
 	 * mainly because there's no standard way to generate one. Only a
 	 * few devices require an FRESET so it should be fine.
 	 */
@@ -1406,7 +1359,7 @@ static int pnv_eeh_get_pe(struct pci_controller *hose,
 	}
 
 	/* Find the PE according to PE# */
-	dev_pe = eeh_pe_get(hose, pe_no, 0);
+	dev_pe = eeh_pe_get(hose, pe_no);
 	if (!dev_pe)
 		return -EEXIST;
 
@@ -1674,7 +1627,6 @@ static int pnv_eeh_restore_config(struct eeh_dev *edev)
 
 static struct eeh_ops pnv_eeh_ops = {
 	.name                   = "powernv",
-	.init                   = pnv_eeh_init,
 	.probe			= pnv_eeh_probe,
 	.set_option             = pnv_eeh_set_option,
 	.get_state              = pnv_eeh_get_state,
@@ -1689,24 +1641,6 @@ static struct eeh_ops pnv_eeh_ops = {
 	.notify_resume		= NULL
 };
 
-#ifdef CONFIG_PCI_IOV
-static void pnv_pci_fixup_vf_mps(struct pci_dev *pdev)
-{
-	struct pci_dn *pdn = pci_get_pdn(pdev);
-	int parent_mps;
-
-	if (!pdev->is_virtfn)
-		return;
-
-	/* Synchronize MPS for VF and PF */
-	parent_mps = pcie_get_mps(pdev->physfn);
-	if ((128 << pdev->pcie_mpss) >= parent_mps)
-		pcie_set_mps(pdev, parent_mps);
-	pdn->mps = pcie_get_mps(pdev);
-}
-DECLARE_PCI_FIXUP_HEADER(PCI_ANY_ID, PCI_ANY_ID, pnv_pci_fixup_vf_mps);
-#endif /* CONFIG_PCI_IOV */
-
 /**
  * eeh_powernv_init - Register platform dependent EEH operations
  *
@@ -1715,9 +1649,44 @@ DECLARE_PCI_FIXUP_HEADER(PCI_ANY_ID, PCI_ANY_ID, pnv_pci_fixup_vf_mps);
  */
 static int __init eeh_powernv_init(void)
 {
+	int max_diag_size = PNV_PCI_DIAG_BUF_SIZE;
+	struct pci_controller *hose;
+	struct pnv_phb *phb;
 	int ret = -EINVAL;
 
-	ret = eeh_ops_register(&pnv_eeh_ops);
+	if (!firmware_has_feature(FW_FEATURE_OPAL)) {
+		pr_warn("%s: OPAL is required !\n", __func__);
+		return -EINVAL;
+	}
+
+	/* Set probe mode */
+	eeh_add_flag(EEH_PROBE_MODE_DEV);
+
+	/*
+	 * P7IOC blocks PCI config access to frozen PE, but PHB3
+	 * doesn't do that. So we have to selectively enable I/O
+	 * prior to collecting error log.
+	 */
+	list_for_each_entry(hose, &hose_list, list_node) {
+		phb = hose->private_data;
+
+		if (phb->model == PNV_PHB_MODEL_P7IOC)
+			eeh_add_flag(EEH_ENABLE_IO_FOR_LOG);
+
+		if (phb->diag_data_size > max_diag_size)
+			max_diag_size = phb->diag_data_size;
+
+		break;
+	}
+
+	/*
+	 * eeh_init() allocates the eeh_pe and its aux data buf so the
+	 * size needs to be set before calling eeh_init().
+	 */
+	eeh_set_pe_aux_size(max_diag_size);
+	ppc_md.pcibios_bus_add_device = pnv_pcibios_bus_add_device;
+
+	ret = eeh_init(&pnv_eeh_ops);
 	if (!ret)
 		pr_info("EEH: PowerNV platform initialized\n");
 	else
@@ -1725,4 +1694,4 @@ static int __init eeh_powernv_init(void)
 
 	return ret;
 }
-machine_early_initcall(powernv, eeh_powernv_init);
+machine_arch_initcall(powernv, eeh_powernv_init);

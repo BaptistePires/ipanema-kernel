@@ -216,9 +216,9 @@ kci_test_route_get()
 	check_err $?
 	ip route get fe80::1 dev "$devdummy" > /dev/null
 	check_err $?
-	ip route get 127.0.0.1 from 127.0.0.1 oif lo tos 0x1 mark 0x1 > /dev/null
+	ip route get 127.0.0.1 from 127.0.0.1 oif lo tos 0x10 mark 0x1 > /dev/null
 	check_err $?
-	ip route get ::1 from ::1 iif lo oif lo tos 0x1 mark 0x1 > /dev/null
+	ip route get ::1 from ::1 iif lo oif lo tos 0x10 mark 0x1 > /dev/null
 	check_err $?
 	ip addr add dev "$devdummy" 10.23.7.11/24
 	check_err $?
@@ -520,6 +520,11 @@ kci_test_encap_fou()
 		return $ksft_skip
 	fi
 
+	if ! /sbin/modprobe -q -n fou; then
+		echo "SKIP: module fou is not found"
+		return $ksft_skip
+	fi
+	/sbin/modprobe -q fou
 	ip -netns "$testns" fou add port 7777 ipproto 47 2>/dev/null
 	if [ $? -ne 0 ];then
 		echo "FAIL: can't add fou port 7777, skipping test"

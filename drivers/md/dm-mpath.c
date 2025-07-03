@@ -105,6 +105,7 @@ struct multipath {
 struct dm_mpath_io {
 	struct pgpath *pgpath;
 	size_t nr_bytes;
+	u64 start_time_ns;
 };
 
 typedef int (*action_fn) (struct pgpath *pgpath);
@@ -295,6 +296,7 @@ static void multipath_init_per_bio_data(struct bio *bio, struct dm_mpath_io **mp
 
 	mpio->nr_bytes = bio->bi_iter.bi_size;
 	mpio->pgpath = NULL;
+	mpio->start_time_ns = 0;
 	*mpio_p = mpio;
 
 	dm_bio_record(bio_details, bio);
@@ -466,10 +468,8 @@ failed:
  */
 #define dm_report_EIO(m)						\
 do {									\
-	struct mapped_device *md = dm_table_get_md((m)->ti->table);	\
-									\
 	DMDEBUG_LIMIT("%s: returning EIO; QIFNP = %d; SQIFNP = %d; DNFS = %d", \
-		      dm_device_name(md),				\
+		      dm_table_device_name((m)->ti->table),		\
 		      test_bit(MPATHF_QUEUE_IF_NO_PATH, &(m)->flags),	\
 		      test_bit(MPATHF_SAVED_QUEUE_IF_NO_PATH, &(m)->flags), \
 		      dm_noflush_suspending((m)->ti));			\
@@ -532,7 +532,7 @@ static int multipath_clone_and_map(struct dm_target *ti, struct request *rq,
 
 	bdev = pgpath->path.dev->bdev;
 	q = bdev_get_queue(bdev);
-	clone = blk_get_request(q, rq->cmd_flags | REQ_NOMERGE,
+	clone = blk_mq_alloc_request(q, rq->cmd_flags | REQ_NOMERGE,
 			BLK_MQ_REQ_NOWAIT);
 	if (IS_ERR(clone)) {
 		/* EBUSY, ENODEV or EWOULDBLOCK: requeue */
@@ -552,7 +552,6 @@ static int multipath_clone_and_map(struct dm_target *ti, struct request *rq,
 		return DM_MAPIO_REQUEUE;
 	}
 	clone->bio = clone->biotail = NULL;
-	clone->rq_disk = bdev->bd_disk;
 	clone->cmd_flags |= REQ_FAILFAST_TRANSPORT;
 	*__clone = clone;
 
@@ -581,7 +580,7 @@ static void multipath_release_clone(struct request *clone,
 						    clone->io_start_time_ns);
 	}
 
-	blk_put_request(clone);
+	blk_mq_free_request(clone);
 }
 
 /*
@@ -649,6 +648,9 @@ static int __multipath_map_bio(struct multipath *m, struct bio *bio,
 	}
 
 	mpio->pgpath = pgpath;
+
+	if (dm_ps_use_hr_timer(pgpath->pg->ps.type))
+		mpio->start_time_ns = ktime_get_ns();
 
 	bio->bi_status = 0;
 	bio_set_dev(bio, pgpath->path.dev->bdev);
@@ -736,7 +738,7 @@ static int queue_if_no_path(struct multipath *m, bool queue_if_no_path,
 {
 	unsigned long flags;
 	bool queue_if_no_path_bit, saved_queue_if_no_path_bit;
-	const char *dm_dev_name = dm_device_name(dm_table_get_md(m->ti->table));
+	const char *dm_dev_name = dm_table_device_name(m->ti->table);
 
 	DMDEBUG("%s: %s caller=%s queue_if_no_path=%d save_old_value=%d",
 		dm_dev_name, __func__, caller, queue_if_no_path, save_old_value);
@@ -781,9 +783,9 @@ static int queue_if_no_path(struct multipath *m, bool queue_if_no_path,
 static void queue_if_no_path_timeout_work(struct timer_list *t)
 {
 	struct multipath *m = from_timer(m, t, nopath_timer);
-	struct mapped_device *md = dm_table_get_md(m->ti->table);
 
-	DMWARN("queue_if_no_path timeout on %s, failing queued IO", dm_device_name(md));
+	DMWARN("queue_if_no_path timeout on %s, failing queued IO",
+	       dm_table_device_name(m->ti->table));
 	queue_if_no_path(m, false, false, __func__);
 }
 
@@ -902,10 +904,7 @@ retain:
 	if (m->hw_handler_name) {
 		r = scsi_dh_attach(q, m->hw_handler_name);
 		if (r == -EBUSY) {
-			char b[BDEVNAME_SIZE];
-
-			printk(KERN_INFO "dm-mpath: retaining handler on device %s\n",
-			       bdevname(bdev, b));
+			DMINFO("retaining handler on device %pg", bdev);
 			goto retain;
 		}
 		if (r < 0) {
@@ -1255,7 +1254,6 @@ static int multipath_ctr(struct dm_target *ti, unsigned argc, char **argv)
 
 	ti->num_flush_bios = 1;
 	ti->num_discard_bios = 1;
-	ti->num_write_same_bios = 1;
 	ti->num_write_zeroes_bios = 1;
 	if (m->queue_mode == DM_TYPE_BIO_BASED)
 		ti->per_io_data_size = multipath_per_bio_data_size();
@@ -1334,7 +1332,7 @@ static int fail_path(struct pgpath *pgpath)
 		goto out;
 
 	DMWARN("%s: Failing path %s.",
-	       dm_device_name(dm_table_get_md(m->ti->table)),
+	       dm_table_device_name(m->ti->table),
 	       pgpath->path.dev->name);
 
 	pgpath->pg->ps.type->fail_path(&pgpath->pg->ps, &pgpath->path);
@@ -1375,7 +1373,7 @@ static int reinstate_path(struct pgpath *pgpath)
 		goto out;
 
 	DMWARN("%s: Reinstating path %s.",
-	       dm_device_name(dm_table_get_md(m->ti->table)),
+	       dm_table_device_name(m->ti->table),
 	       pgpath->path.dev->name);
 
 	r = pgpath->pg->ps.type->reinstate_path(&pgpath->pg->ps, &pgpath->path);
@@ -1720,7 +1718,8 @@ done:
 
 		if (ps->type->end_io)
 			ps->type->end_io(ps, &pgpath->path, mpio->nr_bytes,
-					 dm_start_time_ns_from_clone(clone));
+					 (mpio->start_time_ns ?:
+					  dm_start_time_ns_from_clone(clone)));
 	}
 
 	return r;
@@ -1766,7 +1765,7 @@ static void multipath_resume(struct dm_target *ti)
 	}
 
 	DMDEBUG("%s: %s finished; QIFNP = %d; SQIFNP = %d",
-		dm_device_name(dm_table_get_md(m->ti->table)), __func__,
+		dm_table_device_name(m->ti->table), __func__,
 		test_bit(MPATHF_QUEUE_IF_NO_PATH, &m->flags),
 		test_bit(MPATHF_SAVED_QUEUE_IF_NO_PATH, &m->flags));
 
@@ -1792,7 +1791,7 @@ static void multipath_resume(struct dm_target *ti)
 static void multipath_status(struct dm_target *ti, status_type_t type,
 			     unsigned status_flags, char *result, unsigned maxlen)
 {
-	int sz = 0;
+	int sz = 0, pg_counter, pgpath_counter;
 	unsigned long flags;
 	struct multipath *m = ti->private;
 	struct priority_group *pg;
@@ -1905,6 +1904,44 @@ static void multipath_status(struct dm_target *ti, status_type_t type,
 					      maxlen - sz);
 			}
 		}
+		break;
+
+	case STATUSTYPE_IMA:
+		sz = 0; /*reset the result pointer*/
+
+		DMEMIT_TARGET_NAME_VERSION(ti->type);
+		DMEMIT(",nr_priority_groups=%u", m->nr_priority_groups);
+
+		pg_counter = 0;
+		list_for_each_entry(pg, &m->priority_groups, list) {
+			if (pg->bypassed)
+				state = 'D';	/* Disabled */
+			else if (pg == m->current_pg)
+				state = 'A';	/* Currently Active */
+			else
+				state = 'E';	/* Enabled */
+			DMEMIT(",pg_state_%d=%c", pg_counter, state);
+			DMEMIT(",nr_pgpaths_%d=%u", pg_counter, pg->nr_pgpaths);
+			DMEMIT(",path_selector_name_%d=%s", pg_counter, pg->ps.type->name);
+
+			pgpath_counter = 0;
+			list_for_each_entry(p, &pg->pgpaths, list) {
+				DMEMIT(",path_name_%d_%d=%s,is_active_%d_%d=%c,fail_count_%d_%d=%u",
+				       pg_counter, pgpath_counter, p->path.dev->name,
+				       pg_counter, pgpath_counter, p->is_active ? 'A' : 'F',
+				       pg_counter, pgpath_counter, p->fail_count);
+				if (pg->ps.type->status) {
+					DMEMIT(",path_selector_status_%d_%d=",
+					       pg_counter, pgpath_counter);
+					sz += pg->ps.type->status(&pg->ps, &p->path,
+								  type, result + sz,
+								  maxlen - sz);
+				}
+				pgpath_counter++;
+			}
+			pg_counter++;
+		}
+		DMEMIT(";");
 		break;
 	}
 
@@ -2025,7 +2062,7 @@ static int multipath_prepare_ioctl(struct dm_target *ti,
 	/*
 	 * Only pass ioctls through if the device sizes match exactly.
 	 */
-	if (!r && ti->len != i_size_read((*bdev)->bd_inode) >> SECTOR_SHIFT)
+	if (!r && ti->len != bdev_nr_sectors((*bdev)))
 		return 1;
 	return r;
 }

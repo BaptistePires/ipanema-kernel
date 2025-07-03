@@ -21,8 +21,7 @@
  */
 #include "base.h"
 
-#include <nvif/cl507c.h>
-#include <nvif/event.h>
+#include <nvif/if0014.h>
 #include <nvif/push507c.h>
 #include <nvif/timer.h>
 
@@ -88,7 +87,11 @@ base507c_image_set(struct nv50_wndw *wndw, struct nv50_wndw_atom *asyw)
 			  NVVAL(NV507C, SET_CONVERSION, OFS, 0x64));
 	} else {
 		PUSH_MTHD(push, NV507C, SET_PROCESSING,
-			  NVDEF(NV507C, SET_PROCESSING, USE_GAIN_OFS, DISABLE));
+			  NVDEF(NV507C, SET_PROCESSING, USE_GAIN_OFS, DISABLE),
+
+					SET_CONVERSION,
+			  NVVAL(NV507C, SET_CONVERSION, GAIN, 0) |
+			  NVVAL(NV507C, SET_CONVERSION, OFS, 0));
 	}
 
 	PUSH_MTHD(push, NV507C, SURFACE_SET_OFFSET(0, 0), asyw->image.offset[0] >> 8);
@@ -302,8 +305,8 @@ base507c_new_(const struct nv50_wndw_func *func, const u32 *format,
 	      struct nouveau_drm *drm, int head, s32 oclass, u32 interlock_data,
 	      struct nv50_wndw **pwndw)
 {
-	struct nv50_disp_base_channel_dma_v0 args = {
-		.head = head,
+	struct nvif_disp_chan_v0 args = {
+		.id = head,
 	};
 	struct nouveau_display *disp = nouveau_display(drm->dev);
 	struct nv50_disp *disp50 = nv50_disp(drm->dev);
@@ -323,16 +326,6 @@ base507c_new_(const struct nv50_wndw_func *func, const u32 *format,
 		NV_ERROR(drm, "base%04x allocation failed: %d\n", oclass, ret);
 		return ret;
 	}
-
-	ret = nvif_notify_ctor(&wndw->wndw.base.user, "kmsBaseNtfy",
-			       wndw->notify.func, false,
-			       NV50_DISP_BASE_CHANNEL_DMA_V0_NTFY_UEVENT,
-			       &(struct nvif_notify_uevent_req) {},
-			       sizeof(struct nvif_notify_uevent_req),
-			       sizeof(struct nvif_notify_uevent_rep),
-			       &wndw->notify);
-	if (ret)
-		return ret;
 
 	wndw->ntfy = NV50_DISP_BASE_NTFY(wndw->id);
 	wndw->sema = NV50_DISP_BASE_SEM0(wndw->id);

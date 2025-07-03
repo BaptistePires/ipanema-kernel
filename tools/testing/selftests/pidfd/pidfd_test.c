@@ -330,7 +330,7 @@ static int test_pidfd_send_signal_recycled_pid_fail(void)
 		ksft_exit_fail_msg("%s test: Failed to recycle pid %d\n",
 				   test_name, PID_RECYCLE);
 	case PIDFD_SKIP:
-		ksft_print_msg("%s test: Skipping test\n", test_name);
+		ksft_test_result_skip("%s test: Skipping test\n", test_name);
 		ret = 0;
 		break;
 	case PIDFD_XFAIL:
@@ -441,7 +441,6 @@ static void test_pidfd_poll_exec(int use_waitpid)
 {
 	int pid, pidfd = 0;
 	int status, ret;
-	pthread_t t1;
 	time_t prog_start = time(NULL);
 	const char *test_name = "pidfd_poll check for premature notification on child thread exec";
 
@@ -500,13 +499,14 @@ static int child_poll_leader_exit_test(void *args)
 	 */
 	*child_exit_secs = time(NULL);
 	syscall(SYS_exit, 0);
+	/* Never reached, but appeases compiler thinking we should return. */
+	exit(0);
 }
 
 static void test_pidfd_poll_leader_exit(int use_waitpid)
 {
 	int pid, pidfd = 0;
-	int status, ret;
-	time_t prog_start = time(NULL);
+	int status, ret = 0;
 	const char *test_name = "pidfd_poll check for premature notification on non-empty"
 				"group leader exit";
 
