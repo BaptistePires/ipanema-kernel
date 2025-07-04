@@ -7129,8 +7129,10 @@ int default_wake_function(wait_queue_entry_t *curr, unsigned mode, int wake_flag
 EXPORT_SYMBOL(default_wake_function);
 
 static void __setscheduler_prio(struct task_struct *p, int prio)
-{
-	if (dl_prio(prio))
+{	
+	if (ipanema_policy(p->policy))
+		p->sched_class = &ipanema_sched_class;
+	else if (dl_prio(prio))
 		p->sched_class = &dl_sched_class;
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
