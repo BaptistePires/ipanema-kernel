@@ -8989,9 +8989,10 @@ void sched_move_task(struct task_struct *tsk)
 
 	if (queued)
 		dequeue_task(rq, tsk, queue_flags);
-	if (running)
+	if (running) {
+		tsk->ipanema.nopreempt = 1;
 		put_prev_task(rq, tsk);
-
+	}
 	sched_change_group(tsk, group);
 	scx_move_task(tsk);
 
@@ -8999,6 +9000,7 @@ void sched_move_task(struct task_struct *tsk)
 		enqueue_task(rq, tsk, queue_flags);
 	if (running) {
 		set_next_task(rq, tsk);
+		tsk->ipanema.nopreempt = 0;
 		/*
 		 * After changing group, the running task may have joined a
 		 * throttled one but it's still the running task. Trigger a
