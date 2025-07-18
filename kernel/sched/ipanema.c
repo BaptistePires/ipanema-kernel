@@ -5,6 +5,7 @@
 #include "linux/compiler.h"
 #include "linux/export.h"
 #include "linux/jump_label.h"
+#include "linux/mutex.h"
 #include "linux/sched.h"
 
 
@@ -24,7 +25,15 @@
 #include "sched.h"
 #include "ipanema.h"
 
-DEFINE_STATIC_KEY_FALSE(__saakm_loaded);
+/*
+ * Allows to bypass fair optimizations that assume that
+ * there are no schedclass other than idle after them.
+ * Need a mutex because we can't set the branch with 
+ * interruptions disabled.
+*/
+DEFINE_STATIC_KEY_FALSE(__ipanema_policy_loaded);
+DEFINE_MUTEX(ipanema_policy_loaded_mutex);
+
 
 LIST_HEAD(ipanema_policies);
 s64 num_ipanema_policies;
@@ -116,10 +125,14 @@ int ipanema_add_policy(struct ipanema_policy *policy)
 	policy->id = ipanema_policies_id++;
 	list_add_tail(&policy->list, &ipanema_policies);
 
-	// if (!saakm_enabled())
-		// static_branch_enable(&__saakm_loaded);
 end:
 	write_unlock_irqrestore(&ipanema_rwlock, flags);
+
+	if (!ret) {
+		mutex_lock(&ipanema_policy_loaded_mutex);
+		static_branch_inc(&__ipanema_policy_loaded);
+		mutex_unlock(&ipanema_policy_loaded_mutex);
+	}
 
 	return ret;
 }
@@ -141,6 +154,13 @@ int ipanema_remove_policy(struct ipanema_policy *policy)
 
 end:
 	write_unlock_irqrestore(&ipanema_rwlock, flags);
+
+	
+	if (!ret) {
+		mutex_lock(&ipanema_policy_loaded_mutex);
+		static_branch_dec(&__ipanema_policy_loaded);
+		mutex_unlock(&ipanema_policy_loaded_mutex);
+	}
 
 	return ret;
 }
@@ -386,10 +406,10 @@ static void ipanema_newly_idle(struct ipanema_policy *policy, unsigned int core,
 {
 	struct core_event e = { .target = core };
 	struct rq *rq = cpu_rq(core);
-// 
+
 	WARN(!policy->routines->newly_idle,
 	     "%s is NULL in policy %s\n", __func__, policy->name);
-// 
+
 	/*
 	 * When newly_idle() is called by schedule(), the rq->__lock is
 	 * held. However, the handler may want to lock multiple rq->__lock
@@ -399,20 +419,20 @@ static void ipanema_newly_idle(struct ipanema_policy *policy, unsigned int core,
 	 */
 	rq_unpin_lock(rq, rf);
 	raw_spin_unlock(&rq->__lock);
-// 
+
 	policy->routines->newly_idle(policy, &e);
-// 
+
 	raw_spin_lock(&rq->__lock);
 	rq_repin_lock(rq, rf);
 }
-// 
+
 static void ipanema_enter_idle(struct ipanema_policy *policy, unsigned int core)
 {
 	struct core_event e = { .target = core };
-// 
+
 	WARN(!policy->routines->enter_idle,
 	     "%s is NULL in policy %s\n", __func__, policy->name);
-// 
+
 	policy->routines->enter_idle(policy, &e);
 }
 
@@ -426,19 +446,22 @@ static void ipanema_exit_idle(struct ipanema_policy *policy, unsigned int core)
 	policy->routines->exit_idle(policy, &e);
 }
 
-static void ipanema_balancing_select(void)
+static int ipanema_balancing_select(void)
 {
 	unsigned int core = smp_processor_id();
 	struct ipanema_policy *policy;
 	struct core_event e = { .target = core };
 	unsigned long flags;
+	int ret = 0;
 
 	read_lock_irqsave(&ipanema_rwlock, flags);
 	list_for_each_entry(policy, &ipanema_policies, list) {
 		if (policy->routines->balancing_select)
-			policy->routines->balancing_select(policy, &e);
+			ret = policy->routines->balancing_select(policy, &e);
 	}
 	read_unlock_irqrestore(&ipanema_rwlock, flags);
+	
+	return ret;
 }
 
 
@@ -1295,13 +1318,14 @@ static void put_prev_task_ipanema(struct rq *rq,
 
 #ifdef CONFIG_SMP
 
-
+/* TODO: balancing */
 static int balance_ipanema(struct rq *rq, struct task_struct *prev,
 			   struct rq_flags *rf)
 {
 	if (rq->nr_running)
 		return 1;
-	return 0;
+	
+	return ipanema_balancing_select();
 }
 
 static int select_task_rq_ipanema(struct task_struct *p,

@@ -5966,7 +5966,7 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 
 	rq->dl_server = NULL;
 
-	if (scx_enabled())
+	if (scx_enabled() || ipanema_enabled())
 		goto restart;
 
 	/*

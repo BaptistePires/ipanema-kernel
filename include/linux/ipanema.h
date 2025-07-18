@@ -93,7 +93,7 @@ struct ipanema_module_routines {
 	void (*enter_idle)(struct ipanema_policy *policy, struct core_event *e);
 	void (*exit_idle)(struct ipanema_policy *policy, struct core_event *e);
 
-	void (*balancing_select)(struct ipanema_policy *policy,
+	int (*balancing_select)(struct ipanema_policy *policy,
 				 struct core_event *e);
 
 	void (*core_entry)(struct ipanema_policy *policy, struct core_event *e);

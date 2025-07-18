@@ -2545,6 +2545,11 @@ extern const struct sched_class fair_sched_class;
 extern const struct sched_class ipanema_sched_class;
 extern const struct sched_class idle_sched_class;
 
+/* Ipanema key*/
+DECLARE_STATIC_KEY_FALSE(__ipanema_policy_loaded);	/* Is there an ipanema policy loaded */
+
+#define ipanema_enabled()	static_branch_unlikely(&__ipanema_policy_loaded)
+
 #ifdef CONFIG_SCHED_CLASS_EXT
 extern const struct sched_class ext_sched_class;
 
