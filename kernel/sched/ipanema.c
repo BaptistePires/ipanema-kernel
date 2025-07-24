@@ -28,8 +28,6 @@
 /*
  * Allows to bypass fair optimizations that assume that
  * there are no schedclass other than idle after them.
- * Need a mutex because we can't set the branch with 
- * interruptions disabled.
 */
 DEFINE_STATIC_KEY_FALSE(__ipanema_policy_loaded);
 DEFINE_MUTEX(ipanema_policy_loaded_mutex);
